@@ -1,0 +1,105 @@
+[
+  {
+    "name": "msl-bp_no_decimation",
+    "stages": [
+      {
+        "kind": "msl-bp",
+        "params": {
+          "max_iter": 100,
+          "alpha": null
+        }
+      }
+    ]
+  },
+  {
+    "name": "damped_BP_no_decimation",
+    "stages": [
+      {
+        "kind": "damped_BP",
+        "params": {
+          "max_iter": 100,
+          "alpha": null,
+          "c_damp": 0.5
+        }
+      }
+    ]
+  },
+  {
+    "name": "mem-bp_no_decimation",
+    "stages": [
+      {
+        "kind": "mem-bp",
+        "params": {
+          "max_iter": 100,
+          "alpha": null,
+          "gamma0": 0.1
+        }
+      }
+    ]
+  },
+  {
+    "name": "relay-bp_no_decimation",
+    "stages": [
+      {
+        "kind": "relay-bp",
+        "params": {
+          "alpha": null,
+          "gamma0": 0.1,
+          "pre_iter": 60,
+          "num_sets": 60,
+          "set_max_iter": 60,
+          "gamma_dist_interval": [-0.24, 0.66],
+          "stop_nconv": 5,
+          "stopping_criterion": "nconv",
+          "logging": false
+        }
+      }
+    ]
+  },
+  {
+    "name": "BPGD_Rl_5_Tl_3_Rh_1000_Th_5",
+    "stages": [
+      {
+        "kind": "BPGD",
+        "params": {
+          "R_low": 5,
+          "T_low": 3,
+          "R_high": 1000,
+          "T_high": 5,
+          "alpha": null,
+          "c_damp": null
+        }
+      }
+    ]
+  },
+  {
+    "name": "BPGD-relay-bp_Rl_5_Tl_3_Rh_1000_Th_5",
+    "stages": [
+      {
+        "kind": "BPGD",
+        "params": {
+          "R_low": 5,
+          "T_low": 3,
+          "R_high": 1000,
+          "T_high": 5,
+          "alpha": null,
+          "c_damp": null
+        }
+      },
+      {
+        "kind": "relay-bp",
+        "params": {
+          "alpha": null,
+          "gamma0": 0.1,
+          "pre_iter": 60,
+          "num_sets": 60,
+          "set_max_iter": 60,
+          "gamma_dist_interval": [-0.24, 0.66],
+          "stop_nconv": 5,
+          "stopping_criterion": "nconv",
+          "logging": false
+        }
+      }
+    ]
+  }
+]

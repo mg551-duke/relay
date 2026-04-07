@@ -15,8 +15,14 @@ except ImportError:
 
 from .sinter import (
     CheckMatrices,
+    SinterDecoder_BPGD,
+    SinterDecoder_DampedBP,
     SinterDecoder_MemBP,
     SinterDecoder_MSLBP,
     SinterDecoder_RelayBP,
+    decoder_from_spec,
     sinter_decoders,
+    sinter_decoders_from_specs,
+    SinterFolderRunResult,
+    run_sinter_folder_benchmark,
 )

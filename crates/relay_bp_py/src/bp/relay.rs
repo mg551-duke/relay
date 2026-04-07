@@ -56,6 +56,7 @@ macro_rules! create_bp_interface {
                     max_iter: pre_iter, // pre_iter is equal to max_iter for a single bp run.
                     alpha,
                     alpha_iteration_scaling_factor,
+                    c_damp: None,
                     gamma0,
                     data_scale_value,
                     max_data_value,

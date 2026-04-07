@@ -121,6 +121,71 @@ impl DecodeResult {
     pub fn max_iter(&self) -> usize {
         self.inner.max_iter
     }
+
+    #[getter]
+    pub fn decoding_quality(&self) -> f64 {
+        self.inner.decoding_quality
+    }
+
+    #[getter]
+    pub fn extra_kind(&self) -> &'static str {
+        match &self.inner.extra {
+            relay_bp::decoder::BPExtraResult::None => "none",
+            relay_bp::decoder::BPExtraResult::BPGD(_) => "bpgd",
+        }
+    }
+
+    #[getter]
+    pub fn fallback_used(&self) -> Option<bool> {
+        match &self.inner.extra {
+            relay_bp::decoder::BPExtraResult::None => None,
+            relay_bp::decoder::BPExtraResult::BPGD(extra) => Some(extra.fallback_used),
+        }
+    }
+
+    #[getter]
+    pub fn converged_stage_index(&self) -> Option<usize> {
+        match &self.inner.extra {
+            relay_bp::decoder::BPExtraResult::None => None,
+            relay_bp::decoder::BPExtraResult::BPGD(extra) => extra.converged_stage_index,
+        }
+    }
+
+    #[getter]
+    pub fn stage_names(&self) -> Vec<String> {
+        match &self.inner.extra {
+            relay_bp::decoder::BPExtraResult::None => Vec::new(),
+            relay_bp::decoder::BPExtraResult::BPGD(extra) => extra
+                .stage_results
+                .iter()
+                .map(|stage| stage.name.clone())
+                .collect(),
+        }
+    }
+
+    #[getter]
+    pub fn stage_iterations(&self) -> Vec<usize> {
+        match &self.inner.extra {
+            relay_bp::decoder::BPExtraResult::None => Vec::new(),
+            relay_bp::decoder::BPExtraResult::BPGD(extra) => extra
+                .stage_results
+                .iter()
+                .map(|stage| stage.iterations)
+                .collect(),
+        }
+    }
+
+    #[getter]
+    pub fn stage_converged(&self) -> Vec<bool> {
+        match &self.inner.extra {
+            relay_bp::decoder::BPExtraResult::None => Vec::new(),
+            relay_bp::decoder::BPExtraResult::BPGD(extra) => extra
+                .stage_results
+                .iter()
+                .map(|stage| stage.converged)
+                .collect(),
+        }
+    }
 }
 
 /// A Python module implemented in Rust.

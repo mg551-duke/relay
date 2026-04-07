@@ -8,12 +8,12 @@
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
 """Imports/exports from rust bindings."""
+
 from __future__ import annotations
 
 __all__ = ["ObservableDecoderRunner", "ObservableDecodeResult"]
 
-from _relay_bp import _observable_decoder
-from _relay_bp._observable_decoder import (
-    ObservableDecoderRunner,
-    ObservableDecodeResult,
-)
+from ._relay_bp import _observable_decoder
+
+ObservableDecoderRunner = _observable_decoder.ObservableDecoderRunner
+ObservableDecodeResult = _observable_decoder.ObservableDecodeResult

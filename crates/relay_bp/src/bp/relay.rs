@@ -141,15 +141,15 @@ where
             sets_best = Array1::<bool>::from_elem(1, false);
         }
 
-        if relay_config.explicit_gammas.is_some() {
-            let gammas_shape = relay_config.explicit_gammas.as_ref().unwrap().shape();
+        if let Some(gammas) = relay_config.explicit_gammas.as_ref() {
+            let gammas_shape = gammas.shape();
             let num_variable_nodes = check_matrix.cols();
             if num_variable_nodes != gammas_shape[1] {
-                println!("ERROR: Number of specified gammas {} does not match the number of variable nodes {}.", gammas_shape[1], num_variable_nodes);
-                exit(-1);
+                eprintln!("ERROR: Number of specified gammas {} does not match the number of variable nodes {}.", gammas_shape[1], num_variable_nodes);
+                exit(1);
             };
             if relay_config.num_sets > gammas_shape[0] {
-                println!("WARNING: Number of different gamma sets {} is smaller than the number of Relay legs {}. Legs will be reused.", gammas_shape[0], relay_config.num_sets)
+                eprintln!("WARNING: Number of different gamma sets {} is smaller than the number of Relay legs {}. Legs will be reused.", gammas_shape[0], relay_config.num_sets)
             }
         }
 
@@ -172,6 +172,15 @@ where
         }
     }
 
+    /// Override the inner BP decoder's log-prior ratios.
+    ///
+    /// This is primarily used by wrapper decoders such as BPGD that keep
+    /// the message-passing kernel in Rust while externally deciding which
+    /// variables to clamp between stages.
+    pub fn set_log_prior_ratio_f64(&mut self, log_prior_ratios: Array1<f64>) {
+        self.bp_decoder.set_log_prior_ratio_f64(log_prior_ratios);
+    }
+
     fn init_dismem_state(relay_config: &RelayDecoderConfig) -> PosteriorUpdateState {
         let rng_std: rand::prelude::StdRng = rand::rngs::StdRng::seed_from_u64(relay_config.seed);
         let low = relay_config.gamma_dist_interval.0;
@@ -182,16 +191,12 @@ where
 
     fn init_next_set(&mut self, set_idx: usize) {
         let mut gammas = Array1::zeros(self.check_matrix().cols());
-        if self.relay_config.explicit_gammas.is_some() {
-            let gammas_num_sets = self.relay_config.explicit_gammas.as_ref().unwrap().shape()[0];
-            for i in 0..gammas.len() {
-                gammas[i] = *self
-                    .relay_config
-                    .explicit_gammas
-                    .as_ref()
-                    .unwrap()
+        if let Some(explicit_gammas) = self.relay_config.explicit_gammas.as_ref() {
+            let gammas_num_sets = explicit_gammas.shape()[0];
+            for (i, gamma_ref) in gammas.iter_mut().enumerate() {
+                *gamma_ref = *explicit_gammas
                     .get((set_idx % gammas_num_sets, i))
-                    .unwrap();
+                    .expect("index within explicit_gammas bounds");
             }
             self.bp_decoder.set_memory_strengths_f64(gammas);
             return;

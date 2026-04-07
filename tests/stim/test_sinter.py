@@ -16,6 +16,7 @@ import tempfile
 
 from relay_bp.stim import (
     SinterDecoder_RelayBP,
+    SinterDecoder_MemBP,
     sinter_decoders,
     CheckMatrices,
 )
@@ -154,6 +155,33 @@ def test_sinter_mem_bp_decoder_integration():
     assert samples[0].decoder == "mem-bp"
     assert samples[0].errors <= 20
     assert samples[0].shots == 100
+
+
+def test_sinter_mem_bp_with_damping_integration():
+    """Test native mem-bp with damping exposed through the Sinter wrapper."""
+    circuit = stim.Circuit.generated(
+        rounds=3,
+        distance=3,
+        after_clifford_depolarization=0.0001,
+        code_task="surface_code:rotated_memory_x",
+    )
+    dem = circuit.detector_error_model()
+    compiled = SinterDecoder_MemBP(
+        max_iter=100,
+        alpha=1.0,
+        gamma0=0.15,
+        c_damp=0.5,
+    ).compile_decoder_for_dem(dem=dem)
+
+    packed_dets = circuit.compile_detector_sampler().sample(
+        shots=32,
+        bit_packed=True,
+    )
+    predictions = compiled.decode_shots_bit_packed(
+        bit_packed_detection_event_data=packed_dets,
+    )
+
+    assert predictions.shape[0] == 32
 
 
 def test_sinter_decode_via_files():

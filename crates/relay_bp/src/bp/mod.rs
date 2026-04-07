@@ -8,6 +8,7 @@
 // copyright notice, and modified files need to carry a notice indicating
 // that they have been altered from the originals.
 
+pub mod bpgd;
 pub mod min_sum;
 pub mod min_sum_fixed;
 pub mod relay;

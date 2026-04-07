@@ -26,7 +26,7 @@ macro_rules! create_bp_interface {
         #[pymethods]
         impl $name {
             #[new]
-            #[pyo3(signature = (check_matrix, error_priors, max_iter=200, alpha=None, alpha_iteration_scaling_factor=1.0, gamma0=None, data_scale_value=None, max_data_value=None, int_bits=None, frac_bits=None))]
+            #[pyo3(signature = (check_matrix, error_priors, max_iter=200, alpha=None, alpha_iteration_scaling_factor=1.0, c_damp=None, gamma0=None, data_scale_value=None, max_data_value=None, int_bits=None, frac_bits=None))]
             #[allow(clippy::missing_transmute_annotations, clippy::too_many_arguments)]
             pub fn new(
                 py: Python<'_>,
@@ -35,6 +35,7 @@ macro_rules! create_bp_interface {
                 max_iter: usize,
                 alpha: Option<f64>,
                 alpha_iteration_scaling_factor: f64,
+                c_damp: Option<f64>,
                 gamma0: Option<f64>,
                 data_scale_value: Option<f64>,
                 max_data_value: Option<f64>,
@@ -48,6 +49,7 @@ macro_rules! create_bp_interface {
                     max_iter,
                     alpha,
                     alpha_iteration_scaling_factor,
+                    c_damp,
                     gamma0,
                     data_scale_value,
                     max_data_value,

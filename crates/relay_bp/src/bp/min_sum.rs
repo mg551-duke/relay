@@ -26,6 +26,7 @@ pub struct MinSumDecoderConfig {
     pub max_iter: usize,
     pub alpha: Option<f64>,
     pub alpha_iteration_scaling_factor: f64,
+    pub c_damp: Option<f64>,
     pub gamma0: Option<f64>,
     pub data_scale_value: Option<f64>,
     pub max_data_value: Option<f64>,
@@ -40,6 +41,7 @@ impl Default for MinSumDecoderConfig {
             max_iter: 200,
             alpha: None,
             alpha_iteration_scaling_factor: 1.,
+            c_damp: None,
             gamma0: None,
             data_scale_value: None,
             max_data_value: None,
@@ -389,6 +391,15 @@ where
                     check_to_variable = check_to_variable.neg();
                 }
 
+                if let Some(c_damp) = self.config.c_damp {
+                    let map_ind = self.variable_to_check_nnz_map[ind];
+                    let old_check_to_variable = self.check_to_variable.data()[map_ind];
+                    let c_damp_n = N::from_f64(c_damp).unwrap();
+                    let one_minus_c_damp_n = N::from_f64(1.0 - c_damp).unwrap();
+                    check_to_variable = (c_damp_n * check_to_variable)
+                        + (one_minus_c_damp_n * old_check_to_variable);
+                }
+
                 // We directly manipulate the indicies of the check_to_variable_matrix using
                 // the cached value map to avoid the need for a logarithmic insert
                 self.check_to_variable.data_mut()[self.variable_to_check_nnz_map[ind]] =
@@ -515,8 +526,7 @@ where
     }
     fn bound_magnitudes(&mut self) {
         // Bound magnitudes
-        if self.max_data_value.is_some() {
-            let max_val = self.max_data_value.unwrap();
+        if let Some(max_val) = self.max_data_value {
             self.variable_to_check
                 .data_mut()
                 .iter_mut()

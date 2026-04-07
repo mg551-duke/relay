@@ -216,6 +216,21 @@ pub struct DecodeResult {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct BPStageResult {
+    pub name: String,
+    pub iterations: usize,
+    pub converged: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct BPGDExtraResult {
+    pub fallback_used: bool,
+    pub converged_stage_index: Option<usize>,
+    pub stage_results: Vec<BPStageResult>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum BPExtraResult {
     None,
+    BPGD(BPGDExtraResult),
 }

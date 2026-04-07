@@ -13,8 +13,16 @@ from .check_matrices import (
     CheckMatrices,
 )
 from .decoders import (
+    SinterDecoder_BPGD,
+    SinterDecoder_DampedBP,
     SinterDecoder_MemBP,
     SinterDecoder_MSLBP,
     SinterDecoder_RelayBP,
+    decoder_from_spec,
     sinter_decoders,
+    sinter_decoders_from_specs,
+)
+from .runner import (
+    SinterFolderRunResult,
+    run_sinter_folder_benchmark,
 )

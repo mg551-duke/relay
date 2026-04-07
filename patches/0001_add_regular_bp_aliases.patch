@@ -1,0 +1,26 @@
+*** Begin Patch
+*** Update File: src/relay_bp/stim/sinter/decoders.py
+@@
+ def sinter_decoders(**decoder_kwargs: dict) -> dict[str, Decoder]:
+@@
+-    return {
+-        "relay-bp": SinterDecoder_RelayBP(**decoder_kwargs),  # type: ignore
+-        "mem-bp": SinterDecoder_MemBP(**membp_config),  # type: ignore
+-        "msl-bp": SinterDecoder_MSLBP(**msl_config),  # type: ignore
+-    }
++    relay = SinterDecoder_RelayBP(**decoder_kwargs)  # type: ignore
++    membp = SinterDecoder_MemBP(**membp_config)  # type: ignore
++    regular = SinterDecoder_MSLBP(**msl_config)  # type: ignore
++
++    return {
++        # Original names kept for backwards compatibility.
++        "relay-bp": relay,
++        "mem-bp": membp,
++        "msl-bp": regular,
++        # Experiment-layer aliases matching the modular BPGD naming used in the
++        # standalone Stim benchmarking scripts.
++        "relay_BP": relay,
++        "mem_BP": membp,
++        "regular_BP": regular,
++    }
+*** End Patch
