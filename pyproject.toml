@@ -67,7 +67,10 @@ dev = [
 ]
 stim = [
     "stim>=1.15",
-    "beliefmatching"
+    "sinter>=1.15",
+    "beliefmatching",
+    "pandas",
+    "matplotlib",
 ]
 ml = [
     "torch",
