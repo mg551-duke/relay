@@ -11,4 +11,5 @@
 pub mod bpgd;
 pub mod min_sum;
 pub mod min_sum_fixed;
+pub mod relayed_bpgd;
 pub mod relay;

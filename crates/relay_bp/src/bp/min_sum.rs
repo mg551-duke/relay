@@ -27,6 +27,7 @@ pub struct MinSumDecoderConfig {
     pub alpha: Option<f64>,
     pub alpha_iteration_scaling_factor: f64,
     pub c_damp: Option<f64>,
+    pub explicit_c_damp_messages: Option<Array1<f64>>,
     pub gamma0: Option<f64>,
     pub data_scale_value: Option<f64>,
     pub max_data_value: Option<f64>,
@@ -42,6 +43,7 @@ impl Default for MinSumDecoderConfig {
             alpha: None,
             alpha_iteration_scaling_factor: 1.,
             c_damp: None,
+            explicit_c_damp_messages: None,
             gamma0: None,
             data_scale_value: None,
             max_data_value: None,
@@ -87,6 +89,7 @@ pub struct MinSumBPDecoder<N: PartialEq + Default + Clone + Copy> {
     variable_to_check_nnz_map: Vec<usize>,
     posterior_ratios: Array1<N>,
     memory_strengths: Array1<N>,
+    explicit_c_damp_messages: Option<Array1<N>>,
     decoding: Array1<Bit>,
     max_data_value: Option<N>,
     data_scale_value: Option<N>,
@@ -119,6 +122,10 @@ where
         check_matrix: Arc<SparseBitMatrix>,
         config: Arc<MinSumDecoderConfig>,
     ) -> MinSumBPDecoder<N> {
+        assert!(
+            !(config.c_damp.is_some() && config.explicit_c_damp_messages.is_some()),
+            "Scalar c_damp and explicit_c_damp_messages are mutually exclusive.",
+        );
         let check_to_variable = MinSumBPDecoder::build_check_to_variable(check_matrix.clone());
         let variable_to_check = MinSumBPDecoder::build_variable_to_check(check_matrix.clone());
         let (check_to_variable_nnz_map, variable_to_check_nnz_map) =
@@ -156,6 +163,25 @@ where
 
         let memory_strengths = Array1::from_elem(check_matrix.cols(), N::zero());
 
+        let explicit_c_damp_messages = config
+            .explicit_c_damp_messages
+            .as_ref()
+            .map(|messages| {
+                assert!(
+                    messages.len() == check_to_variable.nnz(),
+                    "explicit_c_damp_messages length {} must match check-matrix nnz {}.",
+                    messages.len(),
+                    check_to_variable.nnz(),
+                );
+                messages.clone().mapv_into_any(|value| {
+                    assert!(
+                        value.is_finite() && (0.0..=1.0).contains(&value),
+                        "Explicit damping values must be finite and in [0, 1]; got {value}.",
+                    );
+                    N::from_f64(value).unwrap()
+                })
+            });
+
         let posterior_ratios = if config.gamma0.is_some() {
             log_prior_ratios.clone()
         } else {
@@ -174,6 +200,7 @@ where
             variable_to_check_nnz_map,
             posterior_ratios,
             memory_strengths,
+            explicit_c_damp_messages,
             decoding,
             max_data_value,
             data_scale_value,
@@ -223,6 +250,52 @@ where
             }
             None => memory_strengths,
         };
+    }
+
+    pub fn set_explicit_c_damp_messages_f64(&mut self, explicit_c_damp_messages: Array1<f64>) {
+        assert!(
+            explicit_c_damp_messages.len() == self.check_to_variable.nnz(),
+            "explicit_c_damp_messages length {} must match check-matrix nnz {}.",
+            explicit_c_damp_messages.len(),
+            self.check_to_variable.nnz(),
+        );
+        self.explicit_c_damp_messages = Some(explicit_c_damp_messages.mapv_into_any(|value| {
+            assert!(
+                value.is_finite() && (0.0..=1.0).contains(&value),
+                "Explicit damping values must be finite and in [0, 1]; got {value}.",
+            );
+            N::from_f64(value).unwrap()
+        }));
+    }
+
+    pub fn clear_explicit_c_damp_messages(&mut self) {
+        self.explicit_c_damp_messages = None;
+    }
+
+    pub fn damping_mode(&self) -> &'static str {
+        if self.explicit_c_damp_messages.is_some() {
+            "edge_message"
+        } else if self.config.c_damp.is_some() {
+            "scalar"
+        } else {
+            "none"
+        }
+    }
+
+    fn damping_bounds(&self) -> (Option<f64>, Option<f64>) {
+        if let Some(explicit_c_damp_messages) = self.explicit_c_damp_messages.as_ref() {
+            let min = explicit_c_damp_messages
+                .iter()
+                .filter_map(|value| value.to_f64())
+                .min_by(|a, b| a.total_cmp(b));
+            let max = explicit_c_damp_messages
+                .iter()
+                .filter_map(|value| value.to_f64())
+                .max_by(|a, b| a.total_cmp(b));
+            (min, max)
+        } else {
+            (self.config.c_damp, self.config.c_damp)
+        }
     }
 
     // Construct a new check message graph
@@ -391,7 +464,14 @@ where
                     check_to_variable = check_to_variable.neg();
                 }
 
-                if let Some(c_damp) = self.config.c_damp {
+                if let Some(explicit_c_damp_messages) = self.explicit_c_damp_messages.as_ref() {
+                    let map_ind = self.variable_to_check_nnz_map[ind];
+                    let old_check_to_variable = self.check_to_variable.data()[map_ind];
+                    let c_damp_n = explicit_c_damp_messages[map_ind];
+                    let one_minus_c_damp_n = N::from_f64(1.0 - c_damp_n.to_f64().unwrap()).unwrap();
+                    check_to_variable =
+                        (c_damp_n * check_to_variable) + (one_minus_c_damp_n * old_check_to_variable);
+                } else if let Some(c_damp) = self.config.c_damp {
                     let map_ind = self.variable_to_check_nnz_map[ind];
                     let old_check_to_variable = self.check_to_variable.data()[map_ind];
                     let c_damp_n = N::from_f64(c_damp).unwrap();
@@ -513,6 +593,9 @@ where
                     None => posterior,
                 }
             }),
+            damping_mode: self.damping_mode().to_string(),
+            damping_min: self.damping_bounds().0,
+            damping_max: self.damping_bounds().1,
             success,
             decoding_quality: if success {
                 self.get_decoding_quality(self.decoding.clone().view())

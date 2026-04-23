@@ -121,3 +121,49 @@ def test_bpgd_high_phase_stops_when_no_variables_left_to_decimate():
     assert list(result.stage_converged) == [False, False]
     assert list(result.stage_iterations) == [2, 1]
     assert result.iterations == 3
+
+
+def test_bpgd_decode_detailed_with_random_candidate_pool(repetition_code_config):
+    decoder = relay_bp.BPGDDecoderF64(
+        repetition_code_config["check_matrix"],
+        error_priors=repetition_code_config["error_priors"],
+        r_low=5,
+        t_low=3,
+        r_high=1000,
+        t_high=5,
+        random_decimation_candidates=3,
+        random_seed=11,
+        fallback_kind="none",
+    )
+
+    result = decoder.decode_detailed(np.array([1, 1], dtype=np.uint8))
+
+    assert result.success
+    assert result.extra_kind == "bpgd"
+
+
+def test_relayed_bpgd_decode_detailed_repetition_code(repetition_code_config):
+    decoder = relay_bp.RelayedBPGDDecoderF64(
+        repetition_code_config["check_matrix"],
+        error_priors=repetition_code_config["error_priors"],
+        alpha=1.0,
+        gamma0=0.15,
+        pre_iter=20,
+        num_sets=2,
+        set_max_iter=10,
+        decimation_pre_iter=5,
+        r_low=1,
+        t_low=5,
+        r_high=0,
+        t_high=5,
+    )
+
+    result = decoder.decode_detailed(np.array([1, 1], dtype=np.uint8))
+
+    assert result.success
+    assert result.extra_kind == "relayed_bpgd"
+    assert result.fallback_used is False
+    assert result.converged_stage_index == 0
+    assert list(result.stage_names) == ["relay_leg_0"]
+    assert list(result.stage_converged) == [True]
+    assert sum(result.stage_iterations) == result.iterations

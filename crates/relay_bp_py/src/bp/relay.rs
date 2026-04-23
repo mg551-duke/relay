@@ -27,7 +27,7 @@ macro_rules! create_bp_interface {
         impl $name {
             #[new]
             #[pyo3(signature = (check_matrix, error_priors, alpha=None, alpha_iteration_scaling_factor=1.0, gamma0=0.1, data_scale_value=None, max_data_value=None, pre_iter=80, num_sets=300,
-                set_max_iter=60, gamma_dist_interval=(-0.24, 0.66), explicit_gammas=None, stop_nconv=1,
+                set_max_iter=60, gamma_dist_interval=(-0.24, 0.66), explicit_gammas=None, explicit_c_damp_messages=None, c_damp_dist_interval=None, relay_posteriors=true, stop_nconv=1,
                 stopping_criterion="nconv".to_string(), logging=false, seed=0))]
             #[allow(clippy::missing_transmute_annotations, clippy::too_many_arguments)]
             pub fn new(
@@ -44,6 +44,9 @@ macro_rules! create_bp_interface {
                 set_max_iter: usize,
                 gamma_dist_interval: (f64, f64),
                 explicit_gammas: Option<&Bound<'_, PyArray2<f64>>>,
+                explicit_c_damp_messages: Option<&Bound<'_, PyArray2<f64>>>,
+                c_damp_dist_interval: Option<(f64, f64)>,
+                relay_posteriors: bool,
                 stop_nconv: usize,
                 stopping_criterion: String,
                 logging: bool,
@@ -57,6 +60,7 @@ macro_rules! create_bp_interface {
                     alpha,
                     alpha_iteration_scaling_factor,
                     c_damp: None,
+                    explicit_c_damp_messages: None,
                     gamma0,
                     data_scale_value,
                     max_data_value,
@@ -80,6 +84,10 @@ macro_rules! create_bp_interface {
                     gamma_dist_interval,
                     explicit_gammas: explicit_gammas
                         .map(|explicit_gammas| unsafe { explicit_gammas.as_array() }.to_owned()),
+                    explicit_c_damp_messages: explicit_c_damp_messages
+                        .map(|explicit_c_damp_messages| unsafe { explicit_c_damp_messages.as_array() }.to_owned()),
+                    c_damp_dist_interval,
+                    relay_posteriors,
                     stopping_criterion,
                     logging,
                     seed,

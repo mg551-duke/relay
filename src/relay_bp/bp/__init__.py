@@ -22,8 +22,10 @@ __all__ = [
     "MinSumBPDecoderI16",
     "MinSumBPDecoderI32",
     "MinSumBPDecoderI64",
+    "MinSumBPDecoderTraceF64",
     "MinSumBPDecoderFixed",
     "BPGDDecoderF64",
+    "RelayedBPGDDecoderF64",
 ]
 
 from .._relay_bp import _bp  # pylint: disable=E0611
@@ -38,5 +40,7 @@ MinSumBPDecoderI8 = _bp.MinSumBPDecoderI8
 MinSumBPDecoderI16 = _bp.MinSumBPDecoderI16
 MinSumBPDecoderI32 = _bp.MinSumBPDecoderI32
 MinSumBPDecoderI64 = _bp.MinSumBPDecoderI64
+MinSumBPDecoderTraceF64 = _bp.MinSumBPDecoderTraceF64
 MinSumBPDecoderFixed = _bp.MinSumBPDecoderFixed
 BPGDDecoderF64 = _bp.BPGDDecoderF64
+RelayedBPGDDecoderF64 = _bp.RelayedBPGDDecoderF64

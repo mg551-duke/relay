@@ -208,6 +208,9 @@ pub struct DecodeResult {
     pub decoding: Array1<Bit>,
     pub decoded_detectors: Array1<Bit>,
     pub posterior_ratios: Array1<f64>,
+    pub damping_mode: String,
+    pub damping_min: Option<f64>,
+    pub damping_max: Option<f64>,
     pub success: bool,
     pub decoding_quality: f64,
     pub iterations: usize,
@@ -218,6 +221,7 @@ pub struct DecodeResult {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct BPStageResult {
     pub name: String,
+    pub damping_mode: String,
     pub iterations: usize,
     pub converged: bool,
 }
@@ -233,4 +237,5 @@ pub struct BPGDExtraResult {
 pub enum BPExtraResult {
     None,
     BPGD(BPGDExtraResult),
+    RelayedBPGD(BPGDExtraResult),
 }

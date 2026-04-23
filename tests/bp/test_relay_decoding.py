@@ -8,6 +8,7 @@
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
 import numpy as np
+import pytest
 
 import relay_bp
 
@@ -60,3 +61,45 @@ def test_decode_detailed_batch(repetition_code_config):
     result2 = results[2]
     assert result2.success
     assert np.all(result2.decoding == np.array([0, 0, 1]))
+
+
+def test_decode_detailed_with_disordered_edge_damping_interval(repetition_code_config):
+    repetition_code_config.pop("max_iter", None)
+    decoder = relay_bp.RelayDecoderF64(
+        **repetition_code_config,
+        pre_iter=20,
+        num_sets=2,
+        set_max_iter=10,
+        gamma0=0.15,
+        c_damp_dist_interval=(0.5, 1.0),
+        seed=7,
+    )
+
+    result = decoder.decode_detailed(np.array([1, 1], dtype=np.uint8))
+
+    assert result.success
+    assert result.damping_mode == "edge_message"
+    assert result.damping_min is not None
+    assert result.damping_max is not None
+    assert 0.5 <= result.damping_min <= result.damping_max <= 1.0
+
+
+def test_decode_detailed_with_explicit_edge_damping_messages(repetition_code_config):
+    repetition_code_config.pop("max_iter", None)
+    nnz = repetition_code_config["check_matrix"].nnz
+    explicit = np.full((3, nnz), 0.75, dtype=np.float64)
+    decoder = relay_bp.RelayDecoderF64(
+        **repetition_code_config,
+        pre_iter=20,
+        num_sets=2,
+        set_max_iter=10,
+        gamma0=0.15,
+        explicit_c_damp_messages=explicit,
+    )
+
+    result = decoder.decode_detailed(np.array([1, 1], dtype=np.uint8))
+
+    assert result.success
+    assert result.damping_mode == "edge_message"
+    assert result.damping_min == pytest.approx(0.75)
+    assert result.damping_max == pytest.approx(0.75)

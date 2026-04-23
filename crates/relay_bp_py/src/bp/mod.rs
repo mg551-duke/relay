@@ -11,6 +11,7 @@
 pub mod bpgd;
 pub mod min_sum;
 pub mod min_sum_fixed;
+pub mod relayed_bpgd;
 pub mod relay;
 
 use pyo3::prelude::*;
@@ -25,7 +26,9 @@ pub fn _bp<'py>(_py: Python<'py>, m: &Bound<'py, PyModule>) -> PyResult<()> {
     m.add_class::<min_sum::MinSumBPDecoderI16>()?;
     m.add_class::<min_sum::MinSumBPDecoderI32>()?;
     m.add_class::<min_sum::MinSumBPDecoderI64>()?;
+    m.add_class::<min_sum::MinSumBPDecoderTraceF64>()?;
     m.add_class::<bpgd::BPGDDecoderF64>()?;
+    m.add_class::<relayed_bpgd::RelayedBPGDDecoderF64>()?;
     m.add_class::<min_sum_fixed::MinSumBPDecoderFixed>()?;
     m.add_class::<relay::RelayDecoderF32>()?;
     m.add_class::<relay::RelayDecoderF64>()?;

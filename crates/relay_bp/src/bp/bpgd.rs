@@ -30,6 +30,8 @@ use crate::decoder::{
     Mod2Mul, SparseBitMatrix,
 };
 use ndarray::{Array1, ArrayView1};
+use rand::Rng;
+use rand::SeedableRng;
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]
@@ -47,6 +49,9 @@ pub struct BPGDDecoderConfig {
     pub alpha: Option<f64>,
     pub alpha_iteration_scaling_factor: f64,
     pub c_damp: Option<f64>,
+    pub explicit_c_damp_messages: Option<Array1<f64>>,
+    pub random_decimation_candidates: usize,
+    pub random_seed: u64,
     pub pre_iter: usize,
     pub initial_decimation_percentage: f64,
     pub r_low: usize,
@@ -63,6 +68,9 @@ impl Default for BPGDDecoderConfig {
             alpha: None,
             alpha_iteration_scaling_factor: 1.0,
             c_damp: None,
+            explicit_c_damp_messages: None,
+            random_decimation_candidates: 1,
+            random_seed: 0,
             pre_iter: 0,
             initial_decimation_percentage: 0.0,
             r_low: 5,
@@ -80,6 +88,7 @@ pub struct BPGDDecoder {
     config: Arc<BPGDDecoderConfig>,
     base_log_prior_ratios: Array1<f64>,
     stage_decoder: MinSumBPDecoder<f64>,
+    decimation_rng: rand::rngs::StdRng,
 }
 
 impl BPGDDecoder {
@@ -92,6 +101,7 @@ impl BPGDDecoder {
                 alpha: config.alpha,
                 alpha_iteration_scaling_factor: config.alpha_iteration_scaling_factor,
                 c_damp: config.c_damp,
+                explicit_c_damp_messages: config.explicit_c_damp_messages.clone(),
                 gamma0: None,
                 data_scale_value: None,
                 max_data_value: None,
@@ -100,38 +110,52 @@ impl BPGDDecoder {
             }),
         );
         let base_log_prior_ratios = stage_decoder.config.log_prior_ratios();
+        let decimation_rng = rand::rngs::StdRng::seed_from_u64(config.random_seed);
         Self {
             check_matrix,
             config,
             base_log_prior_ratios,
             stage_decoder,
+            decimation_rng,
         }
     }
 
     fn choose_decimation_index(
-        &self,
+        &mut self,
         posterior_ratios: &Array1<f64>,
         fixed_bits: &[Option<Bit>],
         choose_low_llr: bool,
     ) -> Option<usize> {
-        let mut best_index: Option<usize> = None;
-        let mut best_value = if choose_low_llr { f64::INFINITY } else { -1.0 };
-        for (index, posterior) in posterior_ratios.iter().enumerate() {
-            if fixed_bits[index].is_some() {
-                continue;
-            }
-            let magnitude = posterior.abs();
-            if choose_low_llr {
-                if magnitude < best_value {
-                    best_value = magnitude;
-                    best_index = Some(index);
+        let mut candidates: Vec<(usize, f64)> = posterior_ratios
+            .iter()
+            .enumerate()
+            .filter_map(|(index, posterior)| {
+                if fixed_bits[index].is_some() {
+                    None
+                } else {
+                    Some((index, posterior.abs()))
                 }
-            } else if magnitude > best_value {
-                best_value = magnitude;
-                best_index = Some(index);
-            }
+            })
+            .collect();
+        if candidates.is_empty() {
+            return None;
         }
-        best_index
+        if choose_low_llr {
+            candidates.sort_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+        } else {
+            candidates.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        }
+        let pool_size = self
+            .config
+            .random_decimation_candidates
+            .max(1)
+            .min(candidates.len());
+        let choice = if pool_size == 1 {
+            0
+        } else {
+            self.decimation_rng.gen_range(0..pool_size)
+        };
+        Some(candidates[choice].0)
     }
 
     fn choose_high_confidence_indices(
@@ -185,7 +209,7 @@ impl BPGDDecoder {
         if remaining == 0 {
             return 0;
         }
-        let count = ((remaining as f64) * fraction).ceil() as usize;
+        let count = ((remaining as f64) * fraction).floor() as usize;
         if count == 0 {
             return 0;
         }
@@ -239,6 +263,7 @@ impl BPGDDecoder {
                         alpha: self.config.alpha,
                         alpha_iteration_scaling_factor: self.config.alpha_iteration_scaling_factor,
                         c_damp: None,
+                        explicit_c_damp_messages: None,
                         gamma0: *gamma0,
                         data_scale_value: None,
                         max_data_value: None,
@@ -341,6 +366,10 @@ impl Decoder for BPGDDecoder {
         }
         stage_results.push(BPStageResult {
             name: "BPGD_low".to_string(),
+            damping_mode: final_result
+                .as_ref()
+                .map(|result| result.damping_mode.clone())
+                .unwrap_or_else(|| self.stage_decoder.damping_mode().to_string()),
             iterations: low_total_iterations,
             converged: low_converged,
         });
@@ -389,6 +418,10 @@ impl Decoder for BPGDDecoder {
             }
             stage_results.push(BPStageResult {
                 name: "BPGD_high".to_string(),
+                damping_mode: final_result
+                    .as_ref()
+                    .map(|result| result.damping_mode.clone())
+                    .unwrap_or_else(|| self.stage_decoder.damping_mode().to_string()),
                 iterations: high_total_iterations,
                 converged: high_converged,
             });
@@ -404,6 +437,7 @@ impl Decoder for BPGDDecoder {
                     }
                     stage_results.push(BPStageResult {
                         name: "relay-bp".to_string(),
+                        damping_mode: fallback_result.damping_mode.clone(),
                         iterations: fallback_result.iterations,
                         converged: fallback_converged,
                     });

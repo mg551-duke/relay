@@ -108,6 +108,21 @@ impl DecodeResult {
     }
 
     #[getter]
+    pub fn damping_mode(&self) -> String {
+        self.inner.damping_mode.clone()
+    }
+
+    #[getter]
+    pub fn damping_min(&self) -> Option<f64> {
+        self.inner.damping_min
+    }
+
+    #[getter]
+    pub fn damping_max(&self) -> Option<f64> {
+        self.inner.damping_max
+    }
+
+    #[getter]
     pub fn success(&self) -> bool {
         self.inner.success
     }
@@ -132,6 +147,7 @@ impl DecodeResult {
         match &self.inner.extra {
             relay_bp::decoder::BPExtraResult::None => "none",
             relay_bp::decoder::BPExtraResult::BPGD(_) => "bpgd",
+            relay_bp::decoder::BPExtraResult::RelayedBPGD(_) => "relayed_bpgd",
         }
     }
 
@@ -140,6 +156,7 @@ impl DecodeResult {
         match &self.inner.extra {
             relay_bp::decoder::BPExtraResult::None => None,
             relay_bp::decoder::BPExtraResult::BPGD(extra) => Some(extra.fallback_used),
+            relay_bp::decoder::BPExtraResult::RelayedBPGD(extra) => Some(extra.fallback_used),
         }
     }
 
@@ -148,6 +165,7 @@ impl DecodeResult {
         match &self.inner.extra {
             relay_bp::decoder::BPExtraResult::None => None,
             relay_bp::decoder::BPExtraResult::BPGD(extra) => extra.converged_stage_index,
+            relay_bp::decoder::BPExtraResult::RelayedBPGD(extra) => extra.converged_stage_index,
         }
     }
 
@@ -156,6 +174,11 @@ impl DecodeResult {
         match &self.inner.extra {
             relay_bp::decoder::BPExtraResult::None => Vec::new(),
             relay_bp::decoder::BPExtraResult::BPGD(extra) => extra
+                .stage_results
+                .iter()
+                .map(|stage| stage.name.clone())
+                .collect(),
+            relay_bp::decoder::BPExtraResult::RelayedBPGD(extra) => extra
                 .stage_results
                 .iter()
                 .map(|stage| stage.name.clone())
@@ -172,6 +195,11 @@ impl DecodeResult {
                 .iter()
                 .map(|stage| stage.iterations)
                 .collect(),
+            relay_bp::decoder::BPExtraResult::RelayedBPGD(extra) => extra
+                .stage_results
+                .iter()
+                .map(|stage| stage.iterations)
+                .collect(),
         }
     }
 
@@ -183,6 +211,28 @@ impl DecodeResult {
                 .stage_results
                 .iter()
                 .map(|stage| stage.converged)
+                .collect(),
+            relay_bp::decoder::BPExtraResult::RelayedBPGD(extra) => extra
+                .stage_results
+                .iter()
+                .map(|stage| stage.converged)
+                .collect(),
+        }
+    }
+
+    #[getter]
+    pub fn stage_damping_modes(&self) -> Vec<String> {
+        match &self.inner.extra {
+            relay_bp::decoder::BPExtraResult::None => Vec::new(),
+            relay_bp::decoder::BPExtraResult::BPGD(extra) => extra
+                .stage_results
+                .iter()
+                .map(|stage| stage.damping_mode.clone())
+                .collect(),
+            relay_bp::decoder::BPExtraResult::RelayedBPGD(extra) => extra
+                .stage_results
+                .iter()
+                .map(|stage| stage.damping_mode.clone())
                 .collect(),
         }
     }

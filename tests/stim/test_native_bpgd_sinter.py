@@ -49,6 +49,36 @@ def test_sinter_decoders_from_native_surface_and_bivariate_specs():
     assert set(bivariate_decoders) == expected_names
 
 
+def test_sinter_decoders_from_disordered_damping_specs():
+    surface_specs = json.loads(
+        (
+            REPO_ROOT / "configs" / "decoder_specs_surface_disordered_damping.json"
+        ).read_text(encoding="utf-8")
+    )
+    bivariate_specs = json.loads(
+        (
+            REPO_ROOT / "configs" / "decoder_specs_bivariate_disordered_damping.json"
+        ).read_text(encoding="utf-8")
+    )
+
+    surface_decoders = sinter_decoders_from_specs(surface_specs)
+    bivariate_decoders = sinter_decoders_from_specs(bivariate_specs)
+
+    expected_names = {
+        "msl-bp_no_decimation",
+        "damped_BP_no_decimation",
+        "mem-bp_no_decimation",
+        "relay-bp_no_decimation",
+        "relay-bp_disordered_damping",
+        "BPGD_Rl_5_Tl_3_Rh_1000_Th_5",
+        "BPGD-relay-bp_Rl_5_Tl_3_Rh_1000_Th_5",
+        "BPGD-relay-bp_disordered_damping_Rl_5_Tl_3_Rh_1000_Th_5",
+        "Relayed_BPGD_disordered_damping",
+    }
+    assert set(surface_decoders) == expected_names
+    assert set(bivariate_decoders) == expected_names
+
+
 def test_decoder_from_spec_rejects_nonrelay_bpgd_fallback():
     with pytest.raises(ValueError, match="only support a relay-bp fallback stage"):
         decoder_from_spec(
@@ -76,6 +106,8 @@ def test_decoder_from_spec_preserves_bpgd_warmup_and_initial_high_decimation():
                         "T_low": 2,
                         "R_high": 9,
                         "T_high": 4,
+                        "random_decimation_candidates": 3,
+                        "random_seed": 17,
                     },
                 }
             ],
@@ -88,6 +120,123 @@ def test_decoder_from_spec_preserves_bpgd_warmup_and_initial_high_decimation():
     assert decoder.t_low == 2
     assert decoder.r_high == 9
     assert decoder.t_high == 4
+    assert decoder.random_decimation_candidates == 3
+    assert decoder.random_seed == 17
+
+
+def test_decoder_from_spec_supports_relayed_bpgd():
+    decoder = decoder_from_spec(
+        {
+            "name": "relayed_bpgd",
+            "stages": [
+                {
+                    "kind": "Relayed_BPGD",
+                    "params": {
+                        "alpha": 1.0,
+                        "gamma0": 0.15,
+                        "pre_iter": 80,
+                        "num_sets": 30,
+                        "set_max_iter": 60,
+                        "gamma_dist_interval": [-0.22628432386414646, 0.6216020925981884],
+                        "relay_posteriors": False,
+                        "stop_nconv": 5,
+                        "decimation_pre_iter": 30,
+                        "R_low": 5,
+                        "T_low": 10,
+                        "R_high": 0,
+                        "T_high": 10,
+                        "random_decimation_candidates": 3,
+                    },
+                }
+            ],
+        }
+    )
+
+    assert decoder.pre_iter == 80
+    assert decoder.num_sets == 30
+    assert decoder.set_max_iter == 60
+    assert decoder.gamma_dist_interval == (-0.22628432386414646, 0.6216020925981884)
+    assert decoder.relay_posteriors is False
+    assert decoder.decimation_pre_iter == 30
+    assert decoder.r_low == 5
+    assert decoder.t_low == 10
+    assert decoder.r_high == 0
+    assert decoder.t_high == 10
+    assert decoder.random_decimation_candidates == 3
+
+
+def test_decoder_from_spec_supports_independent_relay_mode():
+    decoder = decoder_from_spec(
+        {
+            "name": "independent_relay",
+            "stages": [
+                {
+                    "kind": "relay-bp",
+                    "params": {
+                        "alpha": 1.0,
+                        "gamma0": 0.15,
+                        "pre_iter": 80,
+                        "num_sets": 30,
+                        "set_max_iter": 60,
+                        "relay_posteriors": False,
+                    },
+                }
+            ],
+        }
+    )
+
+    assert decoder.pre_iter == 80
+    assert decoder.num_sets == 30
+    assert decoder.set_max_iter == 60
+    assert decoder.relay_posteriors is False
+
+
+def test_decoder_from_spec_supports_relay_interval_damping():
+    decoder = decoder_from_spec(
+        {
+            "name": "relay_damp",
+            "stages": [
+                {
+                    "kind": "relay-bp",
+                    "params": {
+                        "gamma0": 0.15,
+                        "pre_iter": 80,
+                        "num_sets": 30,
+                        "set_max_iter": 60,
+                        "c_damp_dist_interval": [0.5, 1.0],
+                        "seed": 9,
+                    },
+                }
+            ],
+        }
+    )
+
+    assert decoder.c_damp_dist_interval == (0.5, 1.0)
+    assert decoder.seed == 9
+
+
+def test_decoder_from_spec_supports_relayed_bpgd_interval_damping():
+    decoder = decoder_from_spec(
+        {
+            "name": "relay_bpgd_damp",
+            "stages": [
+                {
+                    "kind": "Relayed_BPGD",
+                    "params": {
+                        "gamma0": 0.15,
+                        "pre_iter": 80,
+                        "num_sets": 30,
+                        "set_max_iter": 60,
+                        "c_damp_dist_interval": [0.5, 1.0],
+                        "seed": 9,
+                    },
+                }
+            ],
+        }
+    )
+
+    assert decoder.c_damp_dist_interval == (0.5, 1.0)
+    assert decoder.seed == 9
 
 
 def test_run_sinter_folder_benchmark_smoke(monkeypatch):

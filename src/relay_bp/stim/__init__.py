@@ -19,6 +19,7 @@ from .sinter import (
     SinterDecoder_DampedBP,
     SinterDecoder_MemBP,
     SinterDecoder_MSLBP,
+    SinterDecoder_RelayedBPGD,
     SinterDecoder_RelayBP,
     decoder_from_spec,
     sinter_decoders,

@@ -45,6 +45,9 @@ pub struct RelayDecoderConfig {
     pub set_max_iter: usize,
     pub gamma_dist_interval: (f64, f64),
     pub explicit_gammas: Option<Array2<f64>>,
+    pub explicit_c_damp_messages: Option<Array2<f64>>,
+    pub c_damp_dist_interval: Option<(f64, f64)>,
+    pub relay_posteriors: bool,
     pub stopping_criterion: StoppingCriterion,
     pub logging: bool,
     pub seed: u64,
@@ -58,6 +61,9 @@ impl Default for RelayDecoderConfig {
             set_max_iter: 60,
             gamma_dist_interval: (-0.24, 0.66),
             explicit_gammas: None,
+            explicit_c_damp_messages: None,
+            c_damp_dist_interval: None,
+            relay_posteriors: true,
             stopping_criterion: StoppingCriterion::default(),
             logging: false,
             seed: 0,
@@ -69,6 +75,7 @@ impl Default for RelayDecoderConfig {
 struct PosteriorUpdateState {
     rng_std: rand::rngs::StdRng,
     uniform: rand::distributions::Uniform<f64>,
+    c_damp_uniform: Option<rand::distributions::Uniform<f64>>,
 }
 
 /// An ensemble decoder which controls an inner BP min-sum decoder.
@@ -111,6 +118,16 @@ where
         min_sum_config: Arc<MinSumDecoderConfig>,
         relay_config: Arc<RelayDecoderConfig>,
     ) -> RelayDecoder<N> {
+        assert!(
+            !(min_sum_config.c_damp.is_some()
+                && (relay_config.explicit_c_damp_messages.is_some()
+                    || relay_config.c_damp_dist_interval.is_some())),
+            "Scalar c_damp cannot be combined with relay explicit_c_damp_messages or c_damp_dist_interval.",
+        );
+        assert!(
+            min_sum_config.explicit_c_damp_messages.is_none(),
+            "RelayDecoder expects per-leg edge damping in RelayDecoderConfig, not MinSumDecoderConfig.",
+        );
         if relay_config.logging {
             let log_line = format!(
                 "# pre_iter: {}: sets: {} set_max_iter: {}\n\
@@ -152,6 +169,27 @@ where
                 eprintln!("WARNING: Number of different gamma sets {} is smaller than the number of Relay legs {}. Legs will be reused.", gammas_shape[0], relay_config.num_sets)
             }
         }
+        if let Some(explicit_c_damp_messages) = relay_config.explicit_c_damp_messages.as_ref() {
+            let shape = explicit_c_damp_messages.shape();
+            assert!(
+                shape[0] == relay_config.num_sets + 1,
+                "explicit_c_damp_messages row count {} must match num_sets + 1 = {}.",
+                shape[0],
+                relay_config.num_sets + 1,
+            );
+            assert!(
+                shape[1] == check_matrix.nnz(),
+                "explicit_c_damp_messages column count {} must match check-matrix nnz {}.",
+                shape[1],
+                check_matrix.nnz(),
+            );
+            assert!(
+                explicit_c_damp_messages
+                    .iter()
+                    .all(|value| value.is_finite() && (0.0..=1.0).contains(value)),
+                "explicit_c_damp_messages values must be finite and in [0, 1].",
+            );
+        }
 
         // The actual number of sets Relay ran, depends on the stopping criterion
         let num_executed_sets = 0;
@@ -186,7 +224,32 @@ where
         let low = relay_config.gamma_dist_interval.0;
         let high = relay_config.gamma_dist_interval.1;
         let uniform: rand::distributions::Uniform<f64> = Uniform::new(low, high);
-        PosteriorUpdateState { rng_std, uniform }
+        let c_damp_uniform = relay_config
+            .c_damp_dist_interval
+            .map(|(low, high)| Uniform::new(low, high));
+        PosteriorUpdateState {
+            rng_std,
+            uniform,
+            c_damp_uniform,
+        }
+    }
+
+    fn apply_stage_edge_damping(&mut self, stage_idx: usize) {
+        if let Some(explicit_c_damp_messages) = self.relay_config.explicit_c_damp_messages.as_ref() {
+            let row = explicit_c_damp_messages.row(stage_idx).to_owned();
+            self.bp_decoder.set_explicit_c_damp_messages_f64(row);
+            return;
+        }
+        if let Some(c_damp_uniform) = self.posterior_update_state.c_damp_uniform.as_ref() {
+            let mut c_damp_messages = Array1::zeros(self.check_matrix().nnz());
+            for c_damp in &mut c_damp_messages {
+                *c_damp = c_damp_uniform.sample(&mut self.posterior_update_state.rng_std);
+            }
+            self.bp_decoder
+                .set_explicit_c_damp_messages_f64(c_damp_messages);
+            return;
+        }
+        self.bp_decoder.clear_explicit_c_damp_messages();
     }
 
     fn init_next_set(&mut self, set_idx: usize) {
@@ -208,6 +271,22 @@ where
                 .sample(&mut self.posterior_update_state.rng_std);
         }
         self.bp_decoder.set_memory_strengths_f64(gammas);
+    }
+
+    fn prepare_initial_stage(&mut self) {
+        self.bp_decoder.initialize_decoder();
+        self.apply_stage_edge_damping(0);
+    }
+
+    fn prepare_next_leg(&mut self, set_idx: usize) {
+        self.init_next_set(set_idx);
+        self.apply_stage_edge_damping(set_idx);
+        self.bp_decoder.current_iteration = 0;
+        self.bp_decoder.initialize_check_to_variable();
+        self.bp_decoder.initialize_variable_to_check();
+        if !self.relay_config.relay_posteriors {
+            self.bp_decoder.set_posterior_ratios_to_priors();
+        }
     }
 
     /// Decode with the inner decoder
@@ -298,7 +377,7 @@ where
         let stopping_criterion = self.relay_config.stopping_criterion.clone();
 
         // First Mem-BP
-        self.bp_decoder.initialize_decoder();
+        self.prepare_initial_stage();
         let mut result = self.decode_inner(detectors, self.relay_config.pre_iter);
         self.num_executed_sets = 1;
 
@@ -344,10 +423,7 @@ where
         for set in 1..=self.relay_config.num_sets {
             // Do not completely initialize decoder as we wish to relay
             // posterior marginals with new memory strengths.
-            self.init_next_set(set);
-            self.bp_decoder.current_iteration = 0;
-            self.bp_decoder.initialize_check_to_variable();
-            self.bp_decoder.initialize_variable_to_check();
+            self.prepare_next_leg(set);
             let temp_result = self.decode_inner(detectors, self.relay_config.set_max_iter);
 
             self.num_executed_sets += 1;
@@ -593,5 +669,49 @@ mod tests {
         );
 
         assert_eq!(results[0].decoding.len(), 8785);
+    }
+
+    #[test]
+    fn independent_ensembling_resets_posteriors_to_priors() {
+        let check_matrix = array![[1, 1, 0], [0, 1, 1]];
+        let check_matrix: SparseBipartiteGraph<_> = SparseBipartiteGraph::from_dense(check_matrix);
+        let check_matrix_arc = Arc::new(check_matrix);
+
+        let bp_config = Arc::new(MinSumDecoderConfig {
+            error_priors: array![0.1, 0.2, 0.3],
+            max_iter: 2,
+            alpha: Some(1.0),
+            alpha_iteration_scaling_factor: 1.0,
+            gamma0: Some(0.15),
+            ..Default::default()
+        });
+        let relay_config = Arc::new(RelayDecoderConfig {
+            pre_iter: 2,
+            num_sets: 1,
+            set_max_iter: 2,
+            relay_posteriors: false,
+            ..Default::default()
+        });
+
+        let mut decoder: RelayDecoder<f64> =
+            RelayDecoder::new(check_matrix_arc, bp_config.clone(), relay_config);
+
+        let detectors: Array1<Bit> = array![1, 0];
+        decoder.bp_decoder.initialize_decoder();
+        decoder.bp_decoder.run_iteration(detectors.view());
+        let before_reset = decoder.bp_decoder.build_result(
+            false,
+            decoder.bp_decoder.compute_decoded_detectors(),
+            2,
+        );
+        decoder.prepare_next_leg(1);
+        let after_reset = decoder.bp_decoder.build_result(
+            false,
+            decoder.bp_decoder.compute_decoded_detectors(),
+            2,
+        );
+
+        assert_ne!(before_reset.posterior_ratios, bp_config.log_prior_ratios());
+        assert_eq!(after_reset.posterior_ratios, bp_config.log_prior_ratios());
     }
 }
