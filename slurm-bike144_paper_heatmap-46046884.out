@@ -1,0 +1,30 @@
+REPO_ROOT=/hpc/home/mg551/storage/relay/relay
+SCRIPT_PATH=/hpc/home/mg551/storage/relay/relay/run_bivariate_bicycle144_12_12_paper_heatmap_cluster_Z_basis.py
+OUTPUT_DIR=/hpc/home/mg551/storage/relay/relay/examples/notebook_data/bicycle_bivariate_144_12_12_paper_heatmap_cluster_Z_basis
+SLURM_CPUS_PER_TASK=16
+RAYON_NUM_THREADS=16
+[31mStarting 16 workers...[0m
+repo_root   = /hpc/group/pfisterlab/mg551/storage/relay/relay
+circuits_dir= /hpc/group/pfisterlab/mg551/storage/relay/relay/tests/testdata/bicycle_bivariate
+stim_path   = /hpc/group/pfisterlab/mg551/storage/relay/relay/tests/testdata/bicycle_bivariate/circuit=bicycle_bivariate_144_12_12_memory_Z,distance=12,rounds=12,error_rate=0.003,noise_model=uniform_circuit,basis=CX,A=x^3+y+y^2,B=y^3+x+x^2.stim
+output_dir  = /hpc/group/pfisterlab/mg551/storage/relay/relay/examples/notebook_data/bicycle_bivariate_144_12_12_paper_heatmap_cluster_Z_basis
+plots_dir   = /hpc/group/pfisterlab/mg551/storage/relay/relay/examples/notebook_data/bicycle_bivariate_144_12_12_paper_heatmap_cluster_Z_basis/plots
+num_workers = 16
+paper_url   = https://arxiv.org/abs/2506.01779
+selected_p  = 0.003
+memory_basis= Z
+basis_filter= Z
+gamma0      = 0.125
+pre_iter    = 80
+num_sets    = 300 (total legs = 301)
+set_max_iter= 60
+stop_nconv  = 1
+center_values = [0.0, 0.1, 0.2, 0.30000000000000004, 0.4, 0.5, 0.6000000000000001, 0.7000000000000001, 0.8, 0.9, 1.0]
+width_values  = [0.0, 0.2, 0.4, 0.6000000000000001, 0.8, 1.0, 1.2000000000000002, 1.4000000000000001, 1.6, 1.8, 2.0]
+target_logical_errors = 1
+max_shots_per_point   = 500000
+paper_interval = [-0.240, 0.660] (center=0.210, width=0.900)
+completed_points = 0/121
+
+=== Running heatmap point 1/121: relay-bp-paper-c0p000-w0p000 | center=0.000 width=0.000 ===
+[2026-04-24T11:56:42.621] error: *** JOB 46046884 ON dcc-core-ferc-u-ab39-6-6 CANCELLED AT 2026-04-24T11:56:42 DUE to SIGNAL Terminated ***

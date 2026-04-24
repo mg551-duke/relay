@@ -40,7 +40,7 @@ ERRORS_BY_P = {
     0.004: 10,
     0.005: 10,
 }
-MAX_SHOTS_SAFETY_CAP = 1_000_000
+MAX_SHOTS_SAFETY_CAP = 100_000_000
 
 ALPHA = 1.0
 BASELINE_MAX_ITER = 100
@@ -50,7 +50,7 @@ PRE_ITER = 50
 R_LOW = 5
 T_LOW = 10
 T_HIGH = 10
-R_HIGH_MAX = 1_000_000  # Sentinel; native BPGD caps this internally.
+R_HIGH_MAX = 100_000_000  # Sentinel; native BPGD caps this internally.
 BASIS_FILTER = "Z"
 
 RELAY_GAMMA0 = 0.15
@@ -69,19 +69,26 @@ DEFAULT_DECODER_SEQUENCE = [
     "msl-bp-damp0p5",
     "bpgd-low-only",
     "msl-bp-1000iter",
-    "msl-bp-damp0p5-1000iter",
+    "msl-bp-damp0p5-1000iter", #5
     "bpgd-high-init0p99",
     "bpgd-high-init0p98",
     "msl-bp-damp0p75",
     "msl-bp-damp0p75-1000iter",
-    "msl-bp-10k",
+    "msl-bp-10k", #10
+    "bpgd-high-no_damp_init0p99-pre500-t50",
     "relay-bp-30sets",
     "relay-bp-60sets",
     "relayed-bpgd-30sets",
-    "relayed-bpgd-60sets",
+    "relayed-bpgd-60sets", #15
+    "relay-bp-300sets",
+    "relayed-bpgd-300sets",
     "relay-bp-30sets-independent",
     "relayed-bpgd-30sets-independent",
-    "relayed-bpgd-30sets-independent-random",
+    "relayed-bpgd-30sets-independent-random", #20
+    "relay-bp-300sets-conv1",
+    "relay-bp-300sets-conv100",
+    "relay-bp-300sets-independent-conv100",
+    "relayed-bpgd-300sets-independent-conv100",
 ]
 DEFAULT_DECODER_INDICES: list[int] | None = None
 
@@ -310,6 +317,17 @@ def build_custom_decoders() -> dict[str, object]:
             alpha=ALPHA,
             decoder_label="msl-bp-10k",
         ),
+        "bpgd-high-no_damp_init0p99-pre500-t50": SinterDecoder_BPGD(
+            pre_iter=500,
+            initial_decimation_percentage=0.99,
+            r_low=R_LOW,
+            t_low=T_LOW,
+            r_high=R_HIGH_MAX,
+            t_high=50,
+            alpha=ALPHA,
+            fallback_kind="none",
+            decoder_label="bpgd-high-no_damp_init0p99-pre500-t50",
+        ),
         "relay-bp-30sets": SinterDecoder_RelayBP(
             alpha=ALPHA,
             gamma0=RELAY_GAMMA0,
@@ -329,17 +347,6 @@ def build_custom_decoders() -> dict[str, object]:
             gamma_dist_interval=RELAY_GAMMA_DIST_INTERVAL,
             stop_nconv=RELAY_STOP_NCONV,
             decoder_label="relay-bp-60sets",
-        ),
-        "relay-bp-30sets-independent": SinterDecoder_RelayBP(
-            alpha=ALPHA,
-            gamma0=RELAY_GAMMA0,
-            pre_iter=RELAY_PRE_ITER,
-            num_sets=30,
-            set_max_iter=RELAY_SET_MAX_ITER,
-            gamma_dist_interval=RELAY_GAMMA_DIST_INTERVAL,
-            relay_posteriors=False,
-            stop_nconv=RELAY_STOP_NCONV,
-            decoder_label="relay-bp-30sets-independent",
         ),
         "relayed-bpgd-30sets": SinterDecoder_RelayedBPGD(
             alpha=ALPHA,
@@ -372,6 +379,43 @@ def build_custom_decoders() -> dict[str, object]:
             r_high=RELAYED_BPGD_R_HIGH,
             t_high=RELAYED_BPGD_T_HIGH,
             decoder_label="relayed-bpgd-60sets",
+        ),
+        "relay-bp-300sets": SinterDecoder_RelayBP(
+            alpha=ALPHA,
+            gamma0=RELAY_GAMMA0,
+            pre_iter=RELAY_PRE_ITER,
+            num_sets=300,
+            set_max_iter=RELAY_SET_MAX_ITER,
+            gamma_dist_interval=RELAY_GAMMA_DIST_INTERVAL,
+            stop_nconv=RELAY_STOP_NCONV,
+            decoder_label="relay-bp-300sets",
+        ),
+        "relayed-bpgd-300sets": SinterDecoder_RelayedBPGD(
+            alpha=ALPHA,
+            gamma0=RELAY_GAMMA0,
+            c_damp=None,
+            pre_iter=RELAY_PRE_ITER,
+            num_sets=300,
+            set_max_iter=RELAY_SET_MAX_ITER,
+            gamma_dist_interval=RELAY_GAMMA_DIST_INTERVAL,
+            stop_nconv=RELAY_STOP_NCONV,
+            decimation_pre_iter=RELAYED_BPGD_DECIMATION_PRE_ITER,
+            r_low=RELAYED_BPGD_R_LOW,
+            t_low=RELAYED_BPGD_T_LOW,
+            r_high=RELAYED_BPGD_R_HIGH,
+            t_high=RELAYED_BPGD_T_HIGH,
+            decoder_label="relayed-bpgd-300sets",
+        ),
+        "relay-bp-30sets-independent": SinterDecoder_RelayBP(
+            alpha=ALPHA,
+            gamma0=RELAY_GAMMA0,
+            pre_iter=RELAY_PRE_ITER,
+            num_sets=30,
+            set_max_iter=RELAY_SET_MAX_ITER,
+            gamma_dist_interval=RELAY_GAMMA_DIST_INTERVAL,
+            relay_posteriors=False,
+            stop_nconv=RELAY_STOP_NCONV,
+            decoder_label="relay-bp-30sets-independent",
         ),
         "relayed-bpgd-30sets-independent": SinterDecoder_RelayedBPGD(
             alpha=ALPHA,
@@ -407,6 +451,54 @@ def build_custom_decoders() -> dict[str, object]:
             t_high=RELAYED_BPGD_T_HIGH,
             random_decimation_candidates=3,
             decoder_label="relayed-bpgd-30sets-independent-random",
+        ),
+        "relay-bp-300sets-conv1": SinterDecoder_RelayBP(
+            alpha=ALPHA,
+            gamma0=RELAY_GAMMA0,
+            pre_iter=RELAY_PRE_ITER,
+            num_sets=300,
+            set_max_iter=RELAY_SET_MAX_ITER,
+            gamma_dist_interval=RELAY_GAMMA_DIST_INTERVAL,
+            stop_nconv=1,
+            decoder_label="relay-bp-300sets-conv1",
+        ),
+        "relay-bp-300sets-conv100": SinterDecoder_RelayBP(
+            alpha=ALPHA,
+            gamma0=RELAY_GAMMA0,
+            pre_iter=RELAY_PRE_ITER,
+            num_sets=300,
+            set_max_iter=RELAY_SET_MAX_ITER,
+            gamma_dist_interval=RELAY_GAMMA_DIST_INTERVAL,
+            stop_nconv=100,
+            decoder_label="relay-bp-300sets-conv100",
+        ),
+        "relay-bp-300sets-independent-conv100": SinterDecoder_RelayBP(
+            alpha=ALPHA,
+            gamma0=RELAY_GAMMA0,
+            pre_iter=RELAY_PRE_ITER,
+            num_sets=300,
+            set_max_iter=RELAY_SET_MAX_ITER,
+            gamma_dist_interval=RELAY_GAMMA_DIST_INTERVAL,
+            relay_posteriors=False,
+            stop_nconv=100,
+            decoder_label="relay-bp-300sets-independent-conv100",
+        ),
+        "relayed-bpgd-300sets-independent-conv100": SinterDecoder_RelayedBPGD(
+            alpha=ALPHA,
+            gamma0=RELAY_GAMMA0,
+            c_damp=None,
+            pre_iter=RELAY_PRE_ITER,
+            num_sets=300,
+            set_max_iter=RELAY_SET_MAX_ITER,
+            gamma_dist_interval=RELAY_GAMMA_DIST_INTERVAL,
+            relay_posteriors=False,
+            stop_nconv=100,
+            decimation_pre_iter=RELAYED_BPGD_DECIMATION_PRE_ITER,
+            r_low=RELAYED_BPGD_R_LOW,
+            t_low=RELAYED_BPGD_T_LOW,
+            r_high=RELAYED_BPGD_R_HIGH,
+            t_high=RELAYED_BPGD_T_HIGH,
+            decoder_label="relayed-bpgd-300sets-independent-conv100",
         ),
     }
 

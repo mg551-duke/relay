@@ -1,0 +1,2 @@
+paper_interval_center,paper_interval_width,decoder,point_id,width_idx,center_idx,center,width,interval_low,interval_high,relay_seed,circuit,memory,p,basis_filter_applied,shots,logical_error_count,seconds,logical_error_rate,logical_success_rate,stderr,relative_error,hit_target,shot_cap_reached
+0.21000000000000002,0.9,relay-bp-paper-c0p200-w0p800,46,4,2,0.2,0.8,-0.2,0.6000000000000001,46000138,bicycle_bivariate_144_12_12_memory_Z,Z,0.003,Z,920,3,8.769000000000002,0.003260869565217391,0.9967391304347826,0.001879591854081749,0.5764081685850697,True,False

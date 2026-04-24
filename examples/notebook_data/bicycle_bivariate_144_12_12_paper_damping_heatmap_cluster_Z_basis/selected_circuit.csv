@@ -1,0 +1,2 @@
+stim_path,circuit,distance,rounds,error_rate,noise_model,basis,A,B,p,basis_filter_applied,memory_disabled
+"/hpc/group/pfisterlab/mg551/storage/relay/relay/tests/testdata/bicycle_bivariate/circuit=bicycle_bivariate_144_12_12_memory_Z,distance=12,rounds=12,error_rate=0.003,noise_model=uniform_circuit,basis=CX,A=x^3+y+y^2,B=y^3+x+x^2.stim",bicycle_bivariate_144_12_12_memory_Z,12,12,0.003,uniform_circuit,CX,x^3+y+y^2,y^3+x+x^2,0.003,Z,True

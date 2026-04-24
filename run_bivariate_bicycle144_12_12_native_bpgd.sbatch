@@ -13,8 +13,8 @@ set -euo pipefail
 
 REPO_ROOT="${REPO_ROOT:-$PWD}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
-SCRIPT_PATH="${SCRIPT_PATH:-$REPO_ROOT/run_bivariate_bicycle144_12_12_native_bpgd_cluster.py}"
-OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/examples/notebook_data/bicycle_bivariate_144_12_12_native_bpgd_cluster}"
+SCRIPT_PATH="${SCRIPT_PATH:-$REPO_ROOT/run_bivariate_bicycle144_12_12_native_bpgd_cluster_Z_basis.py}"
+OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/examples/notebook_data/bicycle_bivariate_144_12_12_native_bpgd_cluster_xz_Z_basis}"
 
 export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
@@ -32,4 +32,5 @@ echo "SLURM_CPUS_PER_TASK=${SLURM_CPUS_PER_TASK:-unset}"
 "$PYTHON_BIN" "$SCRIPT_PATH" \
   --repo-root "$REPO_ROOT" \
   --output-dir "$OUTPUT_DIR" \
+  --decoder-indices 24\
   --print-progress
