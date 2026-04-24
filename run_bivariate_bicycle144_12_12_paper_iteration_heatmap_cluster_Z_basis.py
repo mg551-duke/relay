@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cluster runner for paper-style Relay-BP heatmaps on gross-code memory-Z.
+"""Detailed cluster runner for paper-style Relay-BP heatmaps on gross-code memory-Z.
 
 This is the cluster-native version of the Fig. 2 / Fig. 3 gross-code heatmap
 task. Unlike the earlier notebook-style draft, this runner uses `sinter.collect`
@@ -17,6 +17,9 @@ Paper-aligned defaults:
 Each grid square is run as one custom sinter decoder with:
 - `max_errors = 10`
 - `max_shots = 500_000`
+
+Detailed per-shot decode records are also persisted so the output tables and
+heatmaps include the mean decoder iteration count per run.
 """
 
 from __future__ import annotations
@@ -255,6 +258,7 @@ def build_point_decoder(
     set_max_iter: int,
     relay_posteriors: bool,
     stop_nconv: int,
+    details_dir: Path | None = None,
 ) -> SinterDecoder_RelayBP:
     explicit_gammas = None
     gamma_dist_interval = (float(point["interval_low"]), float(point["interval_high"]))
@@ -279,6 +283,7 @@ def build_point_decoder(
         stopping_criterion="nconv",
         logging=False,
         seed=int(point["relay_seed"]),
+        details_dir=str(details_dir) if details_dir is not None else None,
         decoder_label=str(point["decoder"]),
     )
 
@@ -389,6 +394,94 @@ def load_samples_from_resume(resume_csv: Path) -> list[sinter.TaskStats]:
     if not resume_csv.exists():
         return []
     return list(sinter.stats_from_csv_files(resume_csv))
+
+
+def summarize_iteration_details(
+    details_dir: Path,
+    *,
+    points_by_decoder: dict[str, dict[str, Any]],
+) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    if not details_dir.exists():
+        return pd.DataFrame(
+            columns=[
+                "decoder",
+                "detail_shots",
+                "detail_iteration_sum",
+                "mean_iterations",
+            ]
+        )
+
+    aggregates: dict[str, dict[str, float]] = {}
+    for detail_path in sorted(details_dir.glob("*.jsonl")):
+        with detail_path.open("r", encoding="utf-8") as f:
+            for line_number, line in enumerate(f, start=1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(
+                        f"Invalid JSON in detail file {detail_path} at line {line_number}."
+                    ) from exc
+                decoder = str(record.get("decoder", ""))
+                if decoder not in points_by_decoder:
+                    continue
+                iterations = record.get("iterations")
+                if iterations is None:
+                    continue
+                aggregate = aggregates.setdefault(
+                    decoder,
+                    {
+                        "detail_shots": 0.0,
+                        "detail_iteration_sum": 0.0,
+                    },
+                )
+                aggregate["detail_shots"] += 1.0
+                aggregate["detail_iteration_sum"] += float(iterations)
+
+    for decoder, aggregate in sorted(aggregates.items()):
+        detail_shots = float(aggregate["detail_shots"])
+        detail_iteration_sum = float(aggregate["detail_iteration_sum"])
+        rows.append(
+            {
+                "decoder": decoder,
+                "detail_shots": int(detail_shots),
+                "detail_iteration_sum": detail_iteration_sum,
+                "mean_iterations": (
+                    detail_iteration_sum / detail_shots if detail_shots > 0 else np.nan
+                ),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def attach_iteration_metrics(
+    summary_df: pd.DataFrame,
+    *,
+    details_dir: Path,
+    points_by_decoder: dict[str, dict[str, Any]],
+) -> pd.DataFrame:
+    detail_df = summarize_iteration_details(
+        details_dir,
+        points_by_decoder=points_by_decoder,
+    )
+    if summary_df.empty:
+        result = summary_df.copy()
+        result["detail_shots"] = pd.Series(dtype=np.int64)
+        result["detail_iteration_sum"] = pd.Series(dtype=np.float64)
+        result["mean_iterations"] = pd.Series(dtype=np.float64)
+        return result
+
+    result = summary_df.merge(detail_df, on="decoder", how="left")
+    if "detail_shots" not in result.columns:
+        result["detail_shots"] = np.nan
+    if "detail_iteration_sum" not in result.columns:
+        result["detail_iteration_sum"] = np.nan
+    if "mean_iterations" not in result.columns:
+        result["mean_iterations"] = np.nan
+    return result
 
 
 def samples_to_df(
@@ -605,6 +698,8 @@ def grid_to_artifact(
         "shots": np.full(shape, np.nan, dtype=np.float64),
         "logical_error_count": np.full(shape, np.nan, dtype=np.float64),
         "seconds": np.full(shape, np.nan, dtype=np.float64),
+        "detail_shots": np.full(shape, np.nan, dtype=np.float64),
+        "mean_iterations": np.full(shape, np.nan, dtype=np.float64),
     }
     for row in grid_df.itertuples(index=False):
         artifact["logical_error_rate"][row.width_idx, row.center_idx] = float(row.logical_error_rate)
@@ -612,6 +707,12 @@ def grid_to_artifact(
         artifact["shots"][row.width_idx, row.center_idx] = float(row.shots)
         artifact["logical_error_count"][row.width_idx, row.center_idx] = float(row.logical_error_count)
         artifact["seconds"][row.width_idx, row.center_idx] = float(row.seconds)
+        if hasattr(row, "detail_shots") and pd.notna(row.detail_shots):
+            artifact["detail_shots"][row.width_idx, row.center_idx] = float(row.detail_shots)
+        if hasattr(row, "mean_iterations") and pd.notna(row.mean_iterations):
+            artifact["mean_iterations"][row.width_idx, row.center_idx] = float(
+                row.mean_iterations
+            )
     return artifact
 
 
@@ -696,20 +797,25 @@ def plot_collection_heatmaps(
         artifact["logical_error_rate"],
         max_shots_per_point=max_shots_per_point,
     )
+    iterations_display, iterations_norm = positive_lognorm(
+        artifact["mean_iterations"],
+        floor=1.0,
+    )
     shots_display, shots_norm = positive_lognorm(artifact["shots"], floor=1.0)
     seconds_display, seconds_norm = positive_lognorm(artifact["seconds"], floor=1e-3)
 
-    fig, axes = plt.subplots(2, 2, figsize=(14, 11), squeeze=False)
+    fig, axes = plt.subplots(2, 3, figsize=(17, 11), squeeze=False)
     flat_axes = axes.ravel()
 
     specs = [
         ("logical error rate", ler_display, "viridis_r", ler_norm),
+        ("mean iterations", iterations_display, "viridis", iterations_norm),
         ("shots", shots_display, "magma", shots_norm),
         ("logical errors observed", artifact["logical_error_count"], "viridis", None),
         ("wall-clock seconds", seconds_display, "magma", seconds_norm),
     ]
 
-    for ax, (title, data, cmap, norm) in zip(flat_axes, specs, strict=True):
+    for ax, (title, data, cmap, norm) in zip(flat_axes, specs, strict=False):
         mesh = ax.pcolormesh(
             center_edges,
             width_edges,
@@ -731,6 +837,9 @@ def plot_collection_heatmaps(
         ax.set_xlabel("gamma center")
         ax.set_ylabel("gamma width")
         fig.colorbar(mesh, ax=ax, fraction=0.046, pad=0.04)
+
+    for ax in flat_axes[len(specs) :]:
+        ax.axis("off")
 
     fig.suptitle(
         "Collection summary heatmaps | "
@@ -869,7 +978,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Directory for CSV and plot outputs. Defaults to "
-            "examples/notebook_data/bicycle_bivariate_144_12_12_paper_heatmap_cluster_Z_basis "
+            "examples/notebook_data/bicycle_bivariate_144_12_12_paper_iteration_heatmap_cluster_Z_basis "
             "under the repo root."
         ),
     )
@@ -919,7 +1028,7 @@ def main() -> None:
 
     repo_root = args.repo_root.resolve() if args.repo_root else find_repo_root(Path.cwd().resolve())
     circuits_dir = repo_root / "tests" / "testdata" / "bicycle_bivariate"
-    save_stem = "bicycle_bivariate_144_12_12_paper_heatmap_cluster_Z_basis"
+    save_stem = "bicycle_bivariate_144_12_12_paper_iteration_heatmap_cluster_Z_basis"
     output_dir = (
         args.output_dir.resolve()
         if args.output_dir
@@ -938,6 +1047,7 @@ def main() -> None:
     setup_json = output_dir / f"{save_stem}_setup.json"
     selected_circuit_csv = output_dir / "selected_circuit.csv"
     point_manifest_csv = output_dir / f"{save_stem}_point_manifest.csv"
+    details_dir = output_dir / "details"
     paper_plot_png = plots_dir / "paper_style_logical_error_heatmap.png"
     collection_plot_png = plots_dir / "collection_heatmaps.png"
 
@@ -957,6 +1067,10 @@ def main() -> None:
         ]:
             if path.exists():
                 path.unlink()
+        if details_dir.exists():
+            for path in details_dir.glob("*.jsonl"):
+                path.unlink()
+    details_dir.mkdir(parents=True, exist_ok=True)
 
     center_values = resolve_grid_values(
         explicit_values=parse_float_csv(args.center_values),
@@ -1041,6 +1155,11 @@ def main() -> None:
         target_logical_errors=args.target_logical_errors,
         max_shots_per_point=args.max_shots_per_point,
     )
+    initial_summary_df = attach_iteration_metrics(
+        initial_summary_df,
+        details_dir=details_dir,
+        points_by_decoder=points_by_decoder,
+    )
     if initial_samples:
         write_stats(initial_samples, summary_csv)
     save_outputs(
@@ -1074,6 +1193,7 @@ def main() -> None:
     print(f"stim_path   = {stim_path}")
     print(f"output_dir  = {output_dir}")
     print(f"plots_dir   = {plots_dir}")
+    print(f"details_dir = {details_dir}")
     print(f"num_workers = {num_workers}")
     print(f"paper_url   = {PAPER_URL}")
     print(f"selected_p  = {args.p}")
@@ -1119,6 +1239,7 @@ def main() -> None:
             set_max_iter=args.set_max_iter,
             relay_posteriors=relay_posteriors,
             stop_nconv=args.stop_nconv,
+            details_dir=details_dir,
         )
         sinter.collect(
             tasks=tasks,
@@ -1136,6 +1257,11 @@ def main() -> None:
             points_by_decoder=points_by_decoder,
             target_logical_errors=args.target_logical_errors,
             max_shots_per_point=args.max_shots_per_point,
+        )
+        summary_df = attach_iteration_metrics(
+            summary_df,
+            details_dir=details_dir,
+            points_by_decoder=points_by_decoder,
         )
         save_outputs(
             summary_df=summary_df,
@@ -1164,6 +1290,11 @@ def main() -> None:
         target_logical_errors=args.target_logical_errors,
         max_shots_per_point=args.max_shots_per_point,
     )
+    final_summary_df = attach_iteration_metrics(
+        final_summary_df,
+        details_dir=details_dir,
+        points_by_decoder=points_by_decoder,
+    )
     if final_samples:
         write_stats(final_samples, summary_csv)
     save_outputs(
@@ -1189,6 +1320,7 @@ def main() -> None:
     print(f"setup_json       = {setup_json}")
     print(f"selected_circuit = {selected_circuit_csv}")
     print(f"point_manifest   = {point_manifest_csv}")
+    print(f"details_dir      = {details_dir}")
     print(f"resume_csv       = {resume_csv}")
     print(f"summary_csv      = {summary_csv}")
     print(f"grid_csv         = {grid_csv}")

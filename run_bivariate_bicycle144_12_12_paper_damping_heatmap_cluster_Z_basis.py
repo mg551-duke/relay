@@ -16,7 +16,7 @@ Defaults:
 - damping reference interval from the repo's disordered-damping specs: [0.5, 1.0]
 
 Each grid square is run as one custom sinter decoder with:
-- `max_errors = 1`
+- `max_errors = 10`
 - `max_shots = 500_000`
 
 Requested damping intervals are parameterized by center and width exactly like
@@ -86,7 +86,7 @@ DEFAULT_WIDTH_MIN = 0.0
 DEFAULT_WIDTH_MAX = 2.0
 DEFAULT_WIDTH_COUNT = 11
 
-DEFAULT_TARGET_LOGICAL_ERRORS = 1
+DEFAULT_TARGET_LOGICAL_ERRORS = 10
 DEFAULT_MAX_SHOTS_PER_POINT = 500_000
 DEFAULT_BASE_RELAY_SEED = 0
 
