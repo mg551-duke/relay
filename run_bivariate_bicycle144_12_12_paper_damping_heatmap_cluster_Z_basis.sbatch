@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=bike144_paper_heatmap
+#SBATCH --job-name=bike144_damping_heatmap
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --partition=common
@@ -13,8 +13,8 @@ set -euo pipefail
 
 REPO_ROOT="${REPO_ROOT:-$PWD}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
-SCRIPT_PATH="${SCRIPT_PATH:-$REPO_ROOT/run_bivariate_bicycle144_12_12_paper_heatmap_cluster_Z_basis.py}"
-OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/examples/notebook_data/bicycle_bivariate_144_12_12_paper_heatmap_cluster_Z_basis}"
+SCRIPT_PATH="${SCRIPT_PATH:-$REPO_ROOT/run_bivariate_bicycle144_12_12_paper_damping_heatmap_cluster_Z_basis.py}"
+OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/examples/notebook_data/bicycle_bivariate_144_12_12_paper_damping_heatmap_cluster_Z_basis}"
 
 export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
