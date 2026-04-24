@@ -21,10 +21,12 @@ Each grid square is run as one custom sinter decoder with:
 
 Requested damping intervals are parameterized by center and width exactly like
 the gamma heatmap runner. Because damping values must lie in [0, 1], requested
-intervals are clipped to that range before decoding, and the effective interval
-is recorded in the CSV outputs. Detailed per-shot decode records are also
-persisted so the output tables and heatmaps include the mean decoder iteration
-count per run.
+intervals that cross the unit-interval boundary are marked as clipped. By
+default those clipped points are skipped, because treating the clipped interval
+as a real sweep point is misleading. Use `--allow-clipped-intervals` to opt
+back into the old clip-and-run behavior. Detailed per-shot decode records are
+also persisted so the output tables and heatmaps include the mean decoder
+iteration count per run.
 """
 
 from __future__ import annotations
@@ -82,11 +84,11 @@ PAPER_RELAY_POSTERIORS = True
 REFERENCE_DAMP_INTERVAL_LOW = 0.5
 REFERENCE_DAMP_INTERVAL_HIGH = 1.0
 
-DEFAULT_CENTER_MIN = 0.0
-DEFAULT_CENTER_MAX = 1.0
+DEFAULT_CENTER_MIN = 0.3
+DEFAULT_CENTER_MAX = 0.8
 DEFAULT_CENTER_COUNT = 11
-DEFAULT_WIDTH_MIN = 0.0
-DEFAULT_WIDTH_MAX = 2.0
+DEFAULT_WIDTH_MIN = 0.5
+DEFAULT_WIDTH_MAX = 1.5
 DEFAULT_WIDTH_COUNT = 11
 
 DEFAULT_TARGET_LOGICAL_ERRORS = 10
@@ -239,6 +241,7 @@ def build_setup_dict(
     num_workers: int,
     reference_interval_low: float,
     reference_interval_high: float,
+    allow_clipped_intervals: bool,
 ) -> dict[str, Any]:
     reference_center, reference_width = interval_to_center_width(
         reference_interval_low,
@@ -273,7 +276,11 @@ def build_setup_dict(
         "reference_interval_high": float(reference_interval_high),
         "reference_interval_center": float(reference_center),
         "reference_interval_width": float(reference_width),
-        "damping_interval_clipping": "clip_to_[0,1]",
+        "damping_interval_handling": (
+            "clip_to_[0,1]"
+            if allow_clipped_intervals
+            else "skip_clipped_points"
+        ),
         "num_detectors": int(num_detectors),
         "num_observables": int(num_observables),
         "num_fault_mechanisms": int(num_fault_mechanisms),
@@ -306,7 +313,7 @@ def validate_resume_setup(setup_json_path: Path, current_setup: dict[str, Any]) 
         "explicit_gamma_mode",
         "reference_interval_low",
         "reference_interval_high",
-        "damping_interval_clipping",
+        "damping_interval_handling",
     ]
     mismatches = [
         field
@@ -452,6 +459,7 @@ def plot_damping_heatmap(
     relay_posteriors: bool,
     reference_interval_low: float,
     reference_interval_high: float,
+    allow_clipped_intervals: bool,
 ) -> None:
     center_edges = heatmap_edges(center_values)
     width_edges = heatmap_edges(width_values)
@@ -490,7 +498,11 @@ def plot_damping_heatmap(
         f"gamma0 = {gamma0:.3f}, pre_iter = {pre_iter}, total_legs = {num_sets + 1}, "
         f"set_max_iter = {set_max_iter}, stop_nconv = {stop_nconv}\n"
         f"explicit relay gammas = 0, relay_posteriors = {relay_posteriors}, "
-        "damping intervals clipped to [0, 1]"
+        + (
+            "clipped intervals run after clipping to [0, 1]"
+            if allow_clipped_intervals
+            else "requested intervals leaving [0, 1] are skipped"
+        )
     )
     ax.text(0.0, 1.02, subtitle, transform=ax.transAxes, ha="left", va="bottom", fontsize=10)
     colorbar = fig.colorbar(mesh, ax=ax, fraction=0.046, pad=0.04)
@@ -513,6 +525,7 @@ def plot_collection_heatmaps(
     max_shots_per_point: int,
     reference_interval_low: float,
     reference_interval_high: float,
+    allow_clipped_intervals: bool,
 ) -> None:
     center_edges = heatmap_edges(center_values)
     width_edges = heatmap_edges(width_values)
@@ -580,7 +593,12 @@ def plot_collection_heatmaps(
 
     fig.suptitle(
         "BP+damping collection summary heatmaps | "
-        f"{metadata.get('circuit', 'unknown')} | p = {selected_p:.3g} | basis filter = {basis_filter}",
+        f"{metadata.get('circuit', 'unknown')} | p = {selected_p:.3g} | basis filter = {basis_filter}"
+        + (
+            " | clipped intervals run"
+            if allow_clipped_intervals
+            else " | clipped intervals skipped"
+        ),
         fontsize=13,
         y=1.01,
     )
@@ -608,6 +626,7 @@ def save_outputs(
     relay_posteriors: bool,
     reference_interval_low: float,
     reference_interval_high: float,
+    allow_clipped_intervals: bool,
 ) -> None:
     grid_csv = output_dir / f"{save_stem}_grid.csv"
     best_csv = output_dir / f"{save_stem}_best_points.csv"
@@ -666,6 +685,7 @@ def save_outputs(
         relay_posteriors=relay_posteriors,
         reference_interval_low=reference_interval_low,
         reference_interval_high=reference_interval_high,
+        allow_clipped_intervals=allow_clipped_intervals,
     )
     plot_collection_heatmaps(
         artifact=artifact,
@@ -678,6 +698,7 @@ def save_outputs(
         max_shots_per_point=max_shots_per_point,
         reference_interval_low=reference_interval_low,
         reference_interval_high=reference_interval_high,
+        allow_clipped_intervals=allow_clipped_intervals,
     )
 
 
@@ -735,6 +756,14 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=REFERENCE_DAMP_INTERVAL_HIGH,
         help="Reference damping interval high endpoint used for the plot marker and nearest-point CSV.",
+    )
+    parser.add_argument(
+        "--allow-clipped-intervals",
+        action="store_true",
+        help=(
+            "Run points whose requested damping interval crosses [0, 1] by clipping "
+            "to the unit interval first. By default these clipped points are skipped."
+        ),
     )
     parser.add_argument("--center-values", type=str, default=None)
     parser.add_argument("--width-values", type=str, default=None)
@@ -844,6 +873,10 @@ def main() -> None:
         width_values=width_values,
         base_relay_seed=args.base_relay_seed,
     )
+    for point in points:
+        point["scheduled"] = bool(args.allow_clipped_intervals) or (
+            not bool(point["interval_clipped"])
+        )
     points_by_decoder = {str(point["decoder"]): point for point in points}
     point_manifest_df = pd.DataFrame(points)
     point_manifest_df.to_csv(point_manifest_csv, index=False)
@@ -877,6 +910,7 @@ def main() -> None:
         num_workers=num_workers,
         reference_interval_low=args.reference_interval_low,
         reference_interval_high=args.reference_interval_high,
+        allow_clipped_intervals=args.allow_clipped_intervals,
     )
     validate_resume_setup(setup_json, current_setup)
     setup_json.write_text(json.dumps(current_setup, indent=2, sort_keys=True), encoding="utf-8")
@@ -910,6 +944,7 @@ def main() -> None:
         relay_posteriors=relay_posteriors,
         reference_interval_low=args.reference_interval_low,
         reference_interval_high=args.reference_interval_high,
+        allow_clipped_intervals=args.allow_clipped_intervals,
     )
 
     completed_decoders = set(
@@ -919,6 +954,7 @@ def main() -> None:
         ].tolist()
     )
     num_clipped_points = int(point_manifest_df["interval_clipped"].sum())
+    num_scheduled_points = int(point_manifest_df["scheduled"].sum())
 
     print(f"repo_root   = {repo_root}")
     print(f"circuits_dir= {circuits_dir}")
@@ -948,11 +984,19 @@ def main() -> None:
     print(f"width_values  = {width_values.tolist()}")
     print(f"target_logical_errors = {args.target_logical_errors}")
     print(f"max_shots_per_point   = {args.max_shots_per_point}")
+    print(f"allow_clipped_intervals = {args.allow_clipped_intervals}")
     print(f"clipped_points = {num_clipped_points}/{len(points)}")
-    print(f"completed_points = {len(completed_decoders)}/{len(points)}")
+    print(f"scheduled_points = {num_scheduled_points}/{len(points)}")
+    print(f"completed_points = {len(completed_decoders)}/{num_scheduled_points}")
 
     for step_index, point in enumerate(points, start=1):
         decoder_name = str(point["decoder"])
+        if not bool(point["scheduled"]):
+            print(
+                f"\n=== Skipping damping heatmap point {step_index}/{len(points)}: "
+                f"{decoder_name} (requested interval leaves [0, 1]) ==="
+            )
+            continue
         if decoder_name in completed_decoders:
             print(
                 f"\n=== Skipping damping heatmap point {step_index}/{len(points)}: "
@@ -1016,6 +1060,7 @@ def main() -> None:
             relay_posteriors=relay_posteriors,
             reference_interval_low=args.reference_interval_low,
             reference_interval_high=args.reference_interval_high,
+            allow_clipped_intervals=args.allow_clipped_intervals,
         )
         completed_decoders.add(decoder_name)
 
@@ -1048,6 +1093,7 @@ def main() -> None:
         relay_posteriors=relay_posteriors,
         reference_interval_low=args.reference_interval_low,
         reference_interval_high=args.reference_interval_high,
+        allow_clipped_intervals=args.allow_clipped_intervals,
     )
 
     print("\nDone.")
