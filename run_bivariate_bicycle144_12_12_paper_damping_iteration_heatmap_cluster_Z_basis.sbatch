@@ -3,9 +3,8 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --partition=common
-#SBATCH --cpus-per-task=64
-#SBATCH --mem=0
-#SBATCH --exclusive
+#SBATCH --cpus-per-task=32
+#SBATCH --mem=8G
 #SBATCH --time=24:00:00
 #SBATCH --output=slurm-%x-%j.out
 
