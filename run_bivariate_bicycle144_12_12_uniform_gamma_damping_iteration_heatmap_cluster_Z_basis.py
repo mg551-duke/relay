@@ -93,6 +93,8 @@ DEFAULT_WIDTH_COUNT = 11
 DEFAULT_TARGET_LOGICAL_ERRORS = 10
 DEFAULT_MAX_SHOTS_PER_POINT = 500_000
 DEFAULT_BASE_RELAY_SEED = 0
+ZERO_WIDTH_DAMP_EPS = 1e-12
+UNIFORM_GAMMA_EPS = 1e-12
 
 
 def logical_error_lognorm(
@@ -133,6 +135,26 @@ def positive_lognorm(values: np.ndarray, *, floor: float = 1.0) -> tuple[np.ndar
     if vmax <= vmin:
         vmax = vmin * 1.01
     return display_values, LogNorm(vmin=vmin, vmax=vmax)
+
+
+def tiny_interval_around(center: float, *, eps: float = ZERO_WIDTH_DAMP_EPS) -> tuple[float, float]:
+    half_eps = float(eps) / 2.0
+    low = max(0.0, float(center) - half_eps)
+    high = min(1.0, float(center) + half_eps)
+    if not high > low:
+        if float(center) <= 0.0:
+            return 0.0, min(1.0, float(eps))
+        return max(0.0, float(center) - float(eps)), float(center)
+    return low, high
+
+
+def tiny_open_interval(center: float, *, eps: float = UNIFORM_GAMMA_EPS) -> tuple[float, float]:
+    half_eps = float(eps) / 2.0
+    low = float(center) - half_eps
+    high = float(center) + half_eps
+    if not high > low:
+        high = low + float(eps)
+    return low, high
 
 
 def interval_from_center_width(center: float, width: float) -> tuple[float, float]:
@@ -216,18 +238,14 @@ def build_point_decoder(
     stop_nconv: int,
     details_dir: Path | None = None,
 ) -> SinterDecoder_RelayBP:
-    explicit_c_damp_messages = None
     c_damp_dist_interval: tuple[float, float] | None = (
         float(point["interval_low"]),
         float(point["interval_high"]),
     )
     if math.isclose(float(point["effective_width"]), 0.0, abs_tol=1e-12):
-        explicit_c_damp_messages = np.full(
-            (num_sets + 1, num_edges),
-            float(point["effective_center"]),
-            dtype=np.float64,
-        )
-        c_damp_dist_interval = None
+        # Avoid allocating a full (num_sets + 1, nnz) damping matrix for a
+        # degenerate width-zero point; a tiny interval is effectively fixed.
+        c_damp_dist_interval = tiny_interval_around(float(point["effective_center"]))
 
     return SinterDecoder_RelayBP(
         alpha=alpha,
@@ -235,13 +253,11 @@ def build_point_decoder(
         pre_iter=pre_iter,
         num_sets=num_sets,
         set_max_iter=set_max_iter,
-        gamma_dist_interval=(0.0, 1e-12),
-        explicit_gammas=np.full(
-            (num_sets, num_fault_mechanisms),
-            UNIFORM_RELAY_GAMMA,
-            dtype=np.float64,
-        ),
-        explicit_c_damp_messages=explicit_c_damp_messages,
+        # Use a tiny interval instead of an explicit (num_sets, n_vars) gamma
+        # matrix, which otherwise gets replicated across workers and can OOM.
+        gamma_dist_interval=tiny_open_interval(UNIFORM_RELAY_GAMMA),
+        explicit_gammas=None,
+        explicit_c_damp_messages=None,
         c_damp_dist_interval=c_damp_dist_interval,
         relay_posteriors=relay_posteriors,
         stop_nconv=stop_nconv,
