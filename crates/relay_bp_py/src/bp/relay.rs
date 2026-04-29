@@ -26,7 +26,7 @@ macro_rules! create_bp_interface {
         #[pymethods]
         impl $name {
             #[new]
-            #[pyo3(signature = (check_matrix, error_priors, alpha=None, alpha_iteration_scaling_factor=1.0, gamma0=0.1, data_scale_value=None, max_data_value=None, pre_iter=80, num_sets=300,
+            #[pyo3(signature = (check_matrix, error_priors, alpha=None, alpha_iteration_scaling_factor=1.0, gamma0=0.1, data_scale_value=None, max_data_value=None, explicit_edge_message_weights=None, pre_iter=80, num_sets=300,
                 set_max_iter=60, gamma_dist_interval=(-0.24, 0.66), explicit_gammas=None, explicit_c_damp_messages=None, c_damp_dist_interval=None, relay_posteriors=true, stop_nconv=1,
                 stopping_criterion="nconv".to_string(), logging=false, seed=0))]
             #[allow(clippy::missing_transmute_annotations, clippy::too_many_arguments)]
@@ -39,6 +39,7 @@ macro_rules! create_bp_interface {
                 gamma0: Option<f64>,
                 data_scale_value: Option<f64>,
                 max_data_value: Option<f64>,
+                explicit_edge_message_weights: Option<&Bound<'_, PyArray1<f64>>>,
                 pre_iter: usize,
                 num_sets: usize,
                 set_max_iter: usize,
@@ -61,6 +62,8 @@ macro_rules! create_bp_interface {
                     alpha_iteration_scaling_factor,
                     c_damp: None,
                     explicit_c_damp_messages: None,
+                    explicit_edge_message_weights: explicit_edge_message_weights
+                        .map(|weights| unsafe { weights.as_array() }.to_owned()),
                     gamma0,
                     data_scale_value,
                     max_data_value,

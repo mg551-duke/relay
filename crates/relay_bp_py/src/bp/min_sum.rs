@@ -25,6 +25,7 @@ fn build_min_sum_config(
     alpha_iteration_scaling_factor: f64,
     c_damp: Option<f64>,
     explicit_c_damp_messages: Option<&Bound<'_, PyArray1<f64>>>,
+    explicit_edge_message_weights: Option<&Bound<'_, PyArray1<f64>>>,
     gamma0: Option<f64>,
     data_scale_value: Option<f64>,
     max_data_value: Option<f64>,
@@ -38,6 +39,8 @@ fn build_min_sum_config(
         alpha_iteration_scaling_factor,
         c_damp,
         explicit_c_damp_messages: explicit_c_damp_messages
+            .map(|values| unsafe { values.as_array() }.to_owned()),
+        explicit_edge_message_weights: explicit_edge_message_weights
             .map(|values| unsafe { values.as_array() }.to_owned()),
         gamma0,
         data_scale_value,
@@ -56,7 +59,7 @@ macro_rules! create_bp_interface {
         #[pymethods]
         impl $name {
             #[new]
-            #[pyo3(signature = (check_matrix, error_priors, max_iter=200, alpha=None, alpha_iteration_scaling_factor=1.0, c_damp=None, explicit_c_damp_messages=None, gamma0=None, data_scale_value=None, max_data_value=None, int_bits=None, frac_bits=None))]
+            #[pyo3(signature = (check_matrix, error_priors, max_iter=200, alpha=None, alpha_iteration_scaling_factor=1.0, c_damp=None, explicit_c_damp_messages=None, explicit_edge_message_weights=None, gamma0=None, data_scale_value=None, max_data_value=None, int_bits=None, frac_bits=None))]
             #[allow(clippy::missing_transmute_annotations, clippy::too_many_arguments)]
             pub fn new(
                 py: Python<'_>,
@@ -67,6 +70,7 @@ macro_rules! create_bp_interface {
                 alpha_iteration_scaling_factor: f64,
                 c_damp: Option<f64>,
                 explicit_c_damp_messages: Option<&Bound<'_, PyArray1<f64>>>,
+                explicit_edge_message_weights: Option<&Bound<'_, PyArray1<f64>>>,
                 gamma0: Option<f64>,
                 data_scale_value: Option<f64>,
                 max_data_value: Option<f64>,
@@ -82,6 +86,7 @@ macro_rules! create_bp_interface {
                     alpha_iteration_scaling_factor,
                     c_damp,
                     explicit_c_damp_messages,
+                    explicit_edge_message_weights,
                     gamma0,
                     data_scale_value,
                     max_data_value,
@@ -168,7 +173,7 @@ pub struct MinSumBPDecoderTraceF64 {
 #[pymethods]
 impl MinSumBPDecoderTraceF64 {
     #[new]
-    #[pyo3(signature = (check_matrix, error_priors, max_iter=200, alpha=None, alpha_iteration_scaling_factor=1.0, c_damp=None, explicit_c_damp_messages=None, gamma0=None, data_scale_value=None, max_data_value=None, int_bits=None, frac_bits=None))]
+    #[pyo3(signature = (check_matrix, error_priors, max_iter=200, alpha=None, alpha_iteration_scaling_factor=1.0, c_damp=None, explicit_c_damp_messages=None, explicit_edge_message_weights=None, gamma0=None, data_scale_value=None, max_data_value=None, int_bits=None, frac_bits=None))]
     #[allow(clippy::missing_transmute_annotations, clippy::too_many_arguments)]
     pub fn new(
         py: Python<'_>,
@@ -179,6 +184,7 @@ impl MinSumBPDecoderTraceF64 {
         alpha_iteration_scaling_factor: f64,
         c_damp: Option<f64>,
         explicit_c_damp_messages: Option<&Bound<'_, PyArray1<f64>>>,
+        explicit_edge_message_weights: Option<&Bound<'_, PyArray1<f64>>>,
         gamma0: Option<f64>,
         data_scale_value: Option<f64>,
         max_data_value: Option<f64>,
@@ -192,6 +198,7 @@ impl MinSumBPDecoderTraceF64 {
             alpha_iteration_scaling_factor,
             c_damp,
             explicit_c_damp_messages,
+            explicit_edge_message_weights,
             gamma0,
             data_scale_value,
             max_data_value,
@@ -229,6 +236,19 @@ impl MinSumBPDecoderTraceF64 {
 
     pub fn clear_explicit_c_damp_messages(&mut self) {
         self.inner_decoder.clear_explicit_c_damp_messages();
+    }
+
+    pub fn set_explicit_edge_message_weights(
+        &mut self,
+        explicit_edge_message_weights: PyReadonlyArray1<'_, f64>,
+    ) {
+        self.inner_decoder.set_explicit_edge_message_weights_f64(
+            explicit_edge_message_weights.as_array().to_owned(),
+        );
+    }
+
+    pub fn clear_explicit_edge_message_weights(&mut self) {
+        self.inner_decoder.clear_explicit_edge_message_weights();
     }
 
     pub fn set_log_prior_ratios(

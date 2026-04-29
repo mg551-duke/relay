@@ -304,6 +304,7 @@ class SinterDecoder_RelayBP(SinterDecoder_BaseBP):
         set_max_iter: int = 60,
         gamma_dist_interval: tuple[float, float] = (-0.24, 0.66),
         explicit_gammas: np.ndarray | None = None,
+        explicit_edge_message_weights: np.ndarray | None = None,
         explicit_c_damp_messages: np.ndarray | None = None,
         c_damp_dist_interval: tuple[float, float] | None = None,
         relay_posteriors: bool = True,
@@ -333,6 +334,7 @@ class SinterDecoder_RelayBP(SinterDecoder_BaseBP):
         self.set_max_iter = set_max_iter
         self.gamma_dist_interval = tuple(gamma_dist_interval)
         self.explicit_gammas = explicit_gammas
+        self.explicit_edge_message_weights = explicit_edge_message_weights
         self.explicit_c_damp_messages = explicit_c_damp_messages
         self.c_damp_dist_interval = (
             tuple(c_damp_dist_interval) if c_damp_dist_interval is not None else None
@@ -367,6 +369,7 @@ class SinterDecoder_RelayBP(SinterDecoder_BaseBP):
             set_max_iter=self.set_max_iter,
             gamma_dist_interval=self.gamma_dist_interval,
             explicit_gammas=self.explicit_gammas,
+            explicit_edge_message_weights=self.explicit_edge_message_weights,
             explicit_c_damp_messages=self.explicit_c_damp_messages,
             c_damp_dist_interval=self.c_damp_dist_interval,
             relay_posteriors=self.relay_posteriors,

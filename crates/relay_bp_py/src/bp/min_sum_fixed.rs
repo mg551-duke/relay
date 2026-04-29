@@ -52,6 +52,7 @@ impl MinSumBPDecoderFixed {
             c_damp,
             explicit_c_damp_messages: explicit_c_damp_messages
                 .map(|values| unsafe { values.as_array() }.to_owned()),
+            explicit_edge_message_weights: None,
             gamma0,
             data_scale_value,
             max_data_value,

@@ -28,6 +28,7 @@ pub struct MinSumDecoderConfig {
     pub alpha_iteration_scaling_factor: f64,
     pub c_damp: Option<f64>,
     pub explicit_c_damp_messages: Option<Array1<f64>>,
+    pub explicit_edge_message_weights: Option<Array1<f64>>,
     pub gamma0: Option<f64>,
     pub data_scale_value: Option<f64>,
     pub max_data_value: Option<f64>,
@@ -44,6 +45,7 @@ impl Default for MinSumDecoderConfig {
             alpha_iteration_scaling_factor: 1.,
             c_damp: None,
             explicit_c_damp_messages: None,
+            explicit_edge_message_weights: None,
             gamma0: None,
             data_scale_value: None,
             max_data_value: None,
@@ -90,6 +92,7 @@ pub struct MinSumBPDecoder<N: PartialEq + Default + Clone + Copy> {
     posterior_ratios: Array1<N>,
     memory_strengths: Array1<N>,
     explicit_c_damp_messages: Option<Array1<N>>,
+    explicit_edge_message_weights: Option<Array1<N>>,
     decoding: Array1<Bit>,
     max_data_value: Option<N>,
     data_scale_value: Option<N>,
@@ -182,6 +185,25 @@ where
                 })
             });
 
+        let explicit_edge_message_weights = config
+            .explicit_edge_message_weights
+            .as_ref()
+            .map(|weights| {
+                assert!(
+                    weights.len() == check_to_variable.nnz(),
+                    "explicit_edge_message_weights length {} must match check-matrix nnz {}.",
+                    weights.len(),
+                    check_to_variable.nnz(),
+                );
+                weights.clone().mapv_into_any(|value| {
+                    assert!(
+                        value.is_finite(),
+                        "Explicit edge-message weights must be finite; got {value}.",
+                    );
+                    N::from_f64(value).unwrap()
+                })
+            });
+
         let posterior_ratios = if config.gamma0.is_some() {
             log_prior_ratios.clone()
         } else {
@@ -201,6 +223,7 @@ where
             posterior_ratios,
             memory_strengths,
             explicit_c_damp_messages,
+            explicit_edge_message_weights,
             decoding,
             max_data_value,
             data_scale_value,
@@ -270,6 +293,30 @@ where
 
     pub fn clear_explicit_c_damp_messages(&mut self) {
         self.explicit_c_damp_messages = None;
+    }
+
+    pub fn set_explicit_edge_message_weights_f64(
+        &mut self,
+        explicit_edge_message_weights: Array1<f64>,
+    ) {
+        assert!(
+            explicit_edge_message_weights.len() == self.check_to_variable.nnz(),
+            "explicit_edge_message_weights length {} must match check-matrix nnz {}.",
+            explicit_edge_message_weights.len(),
+            self.check_to_variable.nnz(),
+        );
+        self.explicit_edge_message_weights =
+            Some(explicit_edge_message_weights.mapv_into_any(|value| {
+                assert!(
+                    value.is_finite(),
+                    "Explicit edge-message weights must be finite; got {value}.",
+                );
+                N::from_f64(value).unwrap()
+            }));
+    }
+
+    pub fn clear_explicit_edge_message_weights(&mut self) {
+        self.explicit_edge_message_weights = None;
     }
 
     pub fn damping_mode(&self) -> &'static str {
@@ -480,6 +527,13 @@ where
                         + (one_minus_c_damp_n * old_check_to_variable);
                 }
 
+                if let Some(explicit_edge_message_weights) =
+                    self.explicit_edge_message_weights.as_ref()
+                {
+                    let map_ind = self.variable_to_check_nnz_map[ind];
+                    check_to_variable = explicit_edge_message_weights[map_ind] * check_to_variable;
+                }
+
                 // We directly manipulate the indicies of the check_to_variable_matrix using
                 // the cached value map to avoid the need for a logarithmic insert
                 self.check_to_variable.data_mut()[self.variable_to_check_nnz_map[ind]] =
@@ -559,6 +613,17 @@ where
                     check_var_col_ind,
                     self.variable_to_check.data_mut()[self.check_to_variable_nnz_map[ind]]
                 );
+            }
+
+            if let Some(explicit_edge_message_weights) =
+                self.explicit_edge_message_weights.as_ref()
+            {
+                for ind in data_range.clone() {
+                    let map_ind = self.check_to_variable_nnz_map[ind];
+                    let current_value = self.variable_to_check.data()[map_ind];
+                    self.variable_to_check.data_mut()[map_ind] =
+                        explicit_edge_message_weights[ind] * current_value;
+                }
             }
         }
 

@@ -11,13 +11,17 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 from scipy.sparse import csc_matrix
 
 from relay_bp.analysis import (
     build_edge_damping_messages,
+    build_edge_message_weights,
     default_export_code_paths,
     enumerate_half_stabilizer_cases,
+    evaluate_edge_weight_heatmap,
     load_code_capacity_problem,
+    make_min_sum_tracer,
 )
 from relay_bp.analysis.code_capacity_common import CodeCapacityProblem
 from relay_bp.analysis.code_capacity_damping import (
@@ -84,6 +88,27 @@ def test_build_edge_damping_messages_support_only_defaults_outside_edges_to_one(
     assert np.allclose(messages, np.array([1.0, 0.5, 0.5, 1.0], dtype=np.float64))
 
 
+def test_build_edge_message_weights_support_only_defaults_outside_edges_to_one():
+    check_matrix = csc_matrix(
+        np.array(
+            [
+                [1, 1, 0],
+                [0, 1, 1],
+            ],
+            dtype=np.uint8,
+        )
+    )
+
+    weights = build_edge_message_weights(
+        check_matrix,
+        interval=(-0.25, -0.25),
+        coeff_seed=7,
+        support_bits=(1,),
+    )
+
+    assert np.allclose(weights, np.array([1.0, -0.25, -0.25, 1.0], dtype=np.float64))
+
+
 def test_interval_heatmap_decoder_family_and_trace_smoke():
     problem = _toy_problem()
     cases = enumerate_half_stabilizer_cases(problem, max_cases=2, shuffle_seed=3)
@@ -130,6 +155,47 @@ def test_interval_heatmap_decoder_family_and_trace_smoke():
     )
     assert len(trace_artifact["runs"]) == 3
     assert all("posterior_trace" in run for run in trace_artifact["runs"])
+
+
+def test_edge_weight_heatmap_smoke():
+    problem = _toy_problem()
+    cases = enumerate_half_stabilizer_cases(problem, max_cases=2, shuffle_seed=3)
+    tracer = make_min_sum_tracer(problem, max_iter=5, alpha=1.0, gamma0=None)
+    if not hasattr(tracer, "set_explicit_edge_message_weights"):
+        pytest.skip("editable relay_bp extension is stale; explicit edge-message-weight bindings are unavailable")
+
+    artifact = evaluate_edge_weight_heatmap(
+        problem=problem,
+        cases=cases,
+        max_iter=5,
+        alpha=1.0,
+        centers=[0.0],
+        widths=[0.5],
+        base_seed=11,
+        random_draws_per_point=1,
+        support_only=True,
+    )
+    assert artifact["logical_success_rate"].shape == (1, 1)
+    assert int(artifact["trial_count"][0, 0]) == len(cases)
+    assert artifact["memory_interval"] is None
+    assert artifact["damping_interval"] is None
+
+    combined_artifact = evaluate_edge_weight_heatmap(
+        problem=problem,
+        cases=cases,
+        max_iter=5,
+        alpha=1.0,
+        centers=[0.0],
+        widths=[0.5],
+        base_seed=11,
+        random_draws_per_point=1,
+        support_only=True,
+        memory_interval=(-0.1, 0.1),
+        damping_interval=(0.85, 0.95),
+    )
+    assert combined_artifact["logical_success_rate"].shape == (1, 1)
+    assert combined_artifact["memory_interval"] == (-0.1, 0.1)
+    assert combined_artifact["damping_interval"] == (0.85, 0.95)
 
 
 def test_load_code_capacity_problem_reads_exported_npz():

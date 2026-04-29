@@ -305,6 +305,23 @@ def decode_with_edge_damping(
     )
 
 
+def decode_with_edge_message_weights(
+    tracer: relay_bp.MinSumBPDecoderTraceF64,
+    syndrome: np.ndarray,
+    edge_message_weights: np.ndarray,
+    *,
+    n_bits: int,
+) -> Any:
+    return decode_with_memory_edge_damping_and_edge_weights(
+        tracer,
+        syndrome,
+        n_bits=n_bits,
+        memory_strengths=None,
+        edge_damping_messages=None,
+        edge_message_weights=edge_message_weights,
+    )
+
+
 def decode_with_memory_and_edge_damping(
     tracer: relay_bp.MinSumBPDecoderTraceF64,
     syndrome: np.ndarray,
@@ -313,11 +330,47 @@ def decode_with_memory_and_edge_damping(
     memory_strengths: np.ndarray | None,
     edge_damping_messages: np.ndarray | None,
 ) -> Any:
+    return decode_with_memory_edge_damping_and_edge_weights(
+        tracer,
+        syndrome,
+        n_bits=n_bits,
+        memory_strengths=memory_strengths,
+        edge_damping_messages=edge_damping_messages,
+        edge_message_weights=None,
+    )
+
+
+def decode_with_memory_edge_damping_and_edge_weights(
+    tracer: relay_bp.MinSumBPDecoderTraceF64,
+    syndrome: np.ndarray,
+    *,
+    n_bits: int,
+    memory_strengths: np.ndarray | None,
+    edge_damping_messages: np.ndarray | None,
+    edge_message_weights: np.ndarray | None,
+) -> Any:
     tracer.reset()
     if edge_damping_messages is None:
         tracer.clear_explicit_c_damp_messages()
     else:
         tracer.set_explicit_c_damp_messages(np.asarray(edge_damping_messages, dtype=np.float64))
+    supports_explicit_edge_weights = hasattr(
+        tracer,
+        "set_explicit_edge_message_weights",
+    ) and hasattr(
+        tracer,
+        "clear_explicit_edge_message_weights",
+    )
+    if edge_message_weights is None:
+        if supports_explicit_edge_weights:
+            tracer.clear_explicit_edge_message_weights()
+    else:
+        if not supports_explicit_edge_weights:
+            raise RuntimeError(
+                "The loaded relay_bp extension does not expose explicit edge-message-weight methods. "
+                "Rebuild/install the package so the Python bindings match the current source tree."
+            )
+        tracer.set_explicit_edge_message_weights(np.asarray(edge_message_weights, dtype=np.float64))
     if memory_strengths is None:
         tracer.set_memory_strengths(np.zeros(int(n_bits), dtype=np.float64))
     else:
@@ -364,3 +417,46 @@ def build_edge_damping_messages(
         rng = np.random.default_rng(int(coeff_seed))
         messages[target_positions] = rng.uniform(low, high, size=target_positions.size)
     return messages
+
+
+def build_edge_message_weights(
+    check_matrix: csc_matrix,
+    *,
+    interval: tuple[float, float],
+    coeff_seed: int,
+    support_bits: tuple[int, ...] | list[int] | None = None,
+    outside_value: float = 1.0,
+) -> np.ndarray:
+    low, high = float(interval[0]), float(interval[1])
+    if not (np.isfinite(low) and np.isfinite(high)):
+        raise ValueError(f"Edge-weight interval endpoints must be finite; got {interval}.")
+    if low > high:
+        raise ValueError(f"Edge-weight interval low must be <= high; got {interval}.")
+    if not np.isfinite(float(outside_value)):
+        raise ValueError(f"outside_value must be finite; got {outside_value}.")
+    check_matrix = check_matrix.tocsc()
+    weights = np.full(check_matrix.nnz, float(outside_value), dtype=np.float64)
+    if support_bits is None:
+        target_columns = np.arange(check_matrix.shape[1], dtype=int)
+    else:
+        target_columns = np.unique(np.asarray(support_bits, dtype=int))
+    if target_columns.size == 0:
+        return weights
+    positions = []
+    indptr = check_matrix.indptr
+    for col_idx in target_columns:
+        if col_idx < 0 or col_idx >= check_matrix.shape[1]:
+            raise ValueError(f"support bit {col_idx} is out of bounds for {check_matrix.shape[1]} columns.")
+        start = int(indptr[col_idx])
+        end = int(indptr[col_idx + 1])
+        if end > start:
+            positions.append(np.arange(start, end, dtype=int))
+    if not positions:
+        return weights
+    target_positions = np.concatenate(positions)
+    if np.isclose(low, high):
+        weights[target_positions] = low
+    else:
+        rng = np.random.default_rng(int(coeff_seed))
+        weights[target_positions] = rng.uniform(low, high, size=target_positions.size)
+    return weights
