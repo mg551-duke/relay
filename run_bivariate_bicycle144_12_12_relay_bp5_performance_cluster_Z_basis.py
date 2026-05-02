@@ -4,17 +4,18 @@
 This is a circuit-level performance runner for the
 `bicycle_bivariate_144_12_12_memory_Z` family using Z-basis detector filtering.
 It is modeled on `run_bivariate_bicycle144_12_12_native_bpgd_cluster_Z_basis.py`
-but focuses on two Relay-BP-5 variants:
+but focuses on three Relay-BP-5 variants:
 
 1. Relay-BP-5 without damping
 2. Relay-BP-5 with random damping in [0.85, 0.95]
+3. Relay-BP-5 with trained two-point discrete memory
 
 Shared decoder settings:
 - p sweep: 0.001, 0.002, 0.003, 0.004, 0.005
 - max logical errors per p: 50
 - max shots per p: 1e8
 - gamma0 = 0.125
-- relay weights sampled from [-0.24, 0.66]
+- relay weights sampled from [-0.24, 0.66], except for trained discrete memory
 - R = 601 total legs (600 relay continuation legs)
 - stop after 5 converged relay legs
 
@@ -49,7 +50,6 @@ from relay_bp.stim.sinter.runner import _filter_detectors_by_basis
 from relay_bp.stim.sinter.utils import write_stats
 from sinter._decoding._sampler import CompiledSampler, Sampler
 
-
 SELECTED_P_VALUES = [0.001, 0.002, 0.003, 0.004, 0.005]
 ERRORS_BY_P = {
     0.001: 50,
@@ -71,11 +71,18 @@ RELAY_GAMMA_DIST_INTERVAL = (-0.24, 0.66)
 RELAY_STOP_NCONV = 5
 RELAY_POSTERIORS = True
 RELAY_DAMPING_INTERVAL = (0.85, 0.95)
+# Native wrapper order: (negative, positive, p_positive).
+RELAY_BERNOULLI_GAMMA = (
+    -0.0687506131581227,
+    0.3557972204473916,
+    0.5451025293701163,
+)
 RELAY_BASE_SEED = 0
 
 DEFAULT_DECODER_SEQUENCE = [
     "relay-bp5-r601-no-damping",
     "relay-bp5-r601-damp085-095",
+    "relay-bp5-r601-discrete-memory",
 ]
 DEFAULT_DECODER_INDICES: list[int] | None = None
 DEFAULT_MAX_BATCH_SIZE = 64
@@ -122,7 +129,9 @@ def parse_float_csv(text: str | None) -> list[float] | None:
 def find_circuits(circuits_dir: Path, selected_p_values: list[float]) -> list[Path]:
     wanted = {str(p) for p in selected_p_values}
     matched = []
-    for path in sorted(circuits_dir.glob("circuit=bicycle_bivariate_144_12_12_memory_Z,*.stim")):
+    for path in sorted(
+        circuits_dir.glob("circuit=bicycle_bivariate_144_12_12_memory_Z,*.stim")
+    ):
         metadata = parse_name_metadata(path)
         if metadata.get("error_rate") in wanted:
             matched.append(path)
@@ -245,7 +254,10 @@ class CompiledRelayBPIterationSampler(CompiledSampler):
         )
 
         predicted_obs = np.asarray(
-            [np.asarray(detail.observables, dtype=np.uint8) for detail in detailed_results],
+            [
+                np.asarray(detail.observables, dtype=np.uint8)
+                for detail in detailed_results
+            ],
             dtype=np.uint8,
         )
 
@@ -255,7 +267,9 @@ class CompiledRelayBPIterationSampler(CompiledSampler):
         kept_for_error = np.ones(num_kept_after_det, dtype=bool)
         if self.postselected_observables_mask is not None:
             mismatches = actual_obs ^ predicted_obs
-            discard_obs = np.any(mismatches & self.postselected_observables_mask, axis=1)
+            discard_obs = np.any(
+                mismatches & self.postselected_observables_mask, axis=1
+            )
             kept_for_error &= ~discard_obs
             num_discards_2 = int(np.count_nonzero(discard_obs))
         else:
@@ -325,6 +339,14 @@ def build_custom_decoders() -> dict[str, Sampler]:
                 decoder_label="relay-bp5-r601-damp085-095",
             )
         ),
+        "relay-bp5-r601-discrete-memory": RelayBPIterationSampler(
+            decoder=SinterDecoder_RelayBP(
+                **common,
+                gamma_bernoulli=RELAY_BERNOULLI_GAMMA,
+                seed=RELAY_BASE_SEED + 2,
+                decoder_label="relay-bp5-r601-discrete-memory",
+            )
+        ),
     }
 
 
@@ -343,7 +365,9 @@ def samples_to_df(samples: list[sinter.TaskStats]) -> pd.DataFrame:
                 "shots": int(stat.shots),
                 "errors": int(stat.errors),
                 "seconds": float(stat.seconds),
-                "basis_filter_applied": stat.json_metadata.get("basis_filter_applied", "none"),
+                "basis_filter_applied": stat.json_metadata.get(
+                    "basis_filter_applied", "none"
+                ),
                 "detail_shots": detail_shots,
                 "detail_iteration_sum": detail_iteration_sum,
             }
@@ -373,7 +397,8 @@ def samples_to_df(samples: list[sinter.TaskStats]) -> pd.DataFrame:
     df = pd.DataFrame(rows)
     summary_df = (
         df.groupby(
-            ["decoder", "circuit", "memory", "p", "basis_filter_applied"], as_index=False
+            ["decoder", "circuit", "memory", "p", "basis_filter_applied"],
+            as_index=False,
         )
         .agg(
             shots=("shots", "sum"),
@@ -387,7 +412,9 @@ def samples_to_df(samples: list[sinter.TaskStats]) -> pd.DataFrame:
     )
     summary_df["ler"] = summary_df["errors"] / summary_df["shots"]
     summary_df["stderr"] = (
-        (summary_df["ler"] * (1.0 - summary_df["ler"]) / summary_df["shots"]).clip(lower=0.0)
+        (summary_df["ler"] * (1.0 - summary_df["ler"]) / summary_df["shots"]).clip(
+            lower=0.0
+        )
     ) ** 0.5
     summary_df["mean_iterations"] = np.where(
         summary_df["detail_shots"] > 0,
@@ -410,7 +437,9 @@ def plot_logical_error_rate(
         return
 
     fig, ax = plt.subplots(figsize=(8, 5))
-    available = [name for name in decoder_sequence if name in set(summary_df["decoder"])]
+    available = [
+        name for name in decoder_sequence if name in set(summary_df["decoder"])
+    ]
     for decoder_name in available:
         group = summary_df[summary_df["decoder"] == decoder_name].sort_values("p")
         ax.plot(group["p"], group["ler"], marker="o", linewidth=1.8, label=decoder_name)
@@ -438,7 +467,9 @@ def plot_mean_iterations(
         return
 
     fig, ax = plt.subplots(figsize=(8, 5))
-    available = [name for name in decoder_sequence if name in set(summary_df["decoder"])]
+    available = [
+        name for name in decoder_sequence if name in set(summary_df["decoder"])
+    ]
     for decoder_name in available:
         group = summary_df[summary_df["decoder"] == decoder_name].sort_values("p")
         ax.plot(
@@ -452,7 +483,8 @@ def plot_mean_iterations(
     ax.set_title("Relay-BP-5 mean iterations per decoded shot")
     ax.set_xlabel("physical error rate p")
     ax.set_ylabel("mean iterations")
-    ax.grid(True, alpha=0.3)
+    ax.set_yscale("log")
+    ax.grid(True, which="both", alpha=0.3)
     ax.legend(loc="best")
     fig.tight_layout()
     fig.savefig(save_path, dpi=200, bbox_inches="tight")
@@ -471,10 +503,14 @@ def plot_combined_summary(
         return
 
     fig, (ax_ler, ax_iter) = plt.subplots(1, 2, figsize=(12, 5))
-    available = [name for name in decoder_sequence if name in set(summary_df["decoder"])]
+    available = [
+        name for name in decoder_sequence if name in set(summary_df["decoder"])
+    ]
     for decoder_name in available:
         group = summary_df[summary_df["decoder"] == decoder_name].sort_values("p")
-        ax_ler.plot(group["p"], group["ler"], marker="o", linewidth=1.8, label=decoder_name)
+        ax_ler.plot(
+            group["p"], group["ler"], marker="o", linewidth=1.8, label=decoder_name
+        )
         ax_iter.plot(
             group["p"],
             group["mean_iterations"],
@@ -492,7 +528,8 @@ def plot_combined_summary(
     ax_iter.set_title("Mean iterations")
     ax_iter.set_xlabel("physical error rate p")
     ax_iter.set_ylabel("mean iterations")
-    ax_iter.grid(True, alpha=0.3)
+    ax_iter.set_yscale("log")
+    ax_iter.grid(True, which="both", alpha=0.3)
     ax_iter.legend(loc="best")
 
     fig.tight_layout()
@@ -531,6 +568,7 @@ def build_setup_dict(
         "relay_stop_nconv": int(RELAY_STOP_NCONV),
         "relay_posteriors": bool(RELAY_POSTERIORS),
         "relay_damping_interval": list(RELAY_DAMPING_INTERVAL),
+        "relay_bernoulli_gamma": list(RELAY_BERNOULLI_GAMMA),
         "decoder_sequence": list(decoder_sequence),
         "num_workers": int(num_workers),
         "max_batch_size": int(max_batch_size),
@@ -557,7 +595,6 @@ def validate_resume_setup(setup_json_path: Path, current_setup: dict[str, Any]) 
         "relay_stop_nconv",
         "relay_posteriors",
         "relay_damping_interval",
-        "decoder_sequence",
         "max_batch_size",
     ]
     mismatches = [
@@ -565,6 +602,21 @@ def validate_resume_setup(setup_json_path: Path, current_setup: dict[str, Any]) 
         for field in fields_to_compare
         if existing_setup.get(field) != current_setup.get(field)
     ]
+    existing_decoder_sequence = list(existing_setup.get("decoder_sequence", []))
+    current_decoder_sequence = list(current_setup.get("decoder_sequence", []))
+    decoder_sequence_compatible = (
+        existing_decoder_sequence == current_decoder_sequence
+        or current_decoder_sequence[: len(existing_decoder_sequence)]
+        == existing_decoder_sequence
+    )
+    if not decoder_sequence_compatible:
+        mismatches.append("decoder_sequence")
+
+    if "relay_bernoulli_gamma" in existing_setup and existing_setup.get(
+        "relay_bernoulli_gamma"
+    ) != current_setup.get("relay_bernoulli_gamma"):
+        mismatches.append("relay_bernoulli_gamma")
+
     if mismatches:
         mismatch_text = ", ".join(mismatches)
         raise ValueError(
@@ -656,7 +708,11 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    repo_root = args.repo_root.resolve() if args.repo_root else find_repo_root(Path.cwd().resolve())
+    repo_root = (
+        args.repo_root.resolve()
+        if args.repo_root
+        else find_repo_root(Path.cwd().resolve())
+    )
     circuits_dir = repo_root / "tests" / "testdata" / "bicycle_bivariate"
     output_dir = (
         args.output_dir.resolve()
@@ -695,7 +751,9 @@ def main() -> None:
 
     matched_circuits = find_circuits(circuits_dir, selected_p_values)
     tasks = build_tasks(matched_circuits)
-    matched_metadata_df = pd.DataFrame([parse_name_metadata(path) for path in matched_circuits])
+    matched_metadata_df = pd.DataFrame(
+        [parse_name_metadata(path) for path in matched_circuits]
+    )
     matched_metadata_df["basis_filter_applied"] = BASIS_FILTER
     matched_metadata_df.to_csv(output_dir / "matched_circuits.csv", index=False)
 
@@ -723,6 +781,7 @@ def main() -> None:
     print("errors_by_p =", ERRORS_BY_P)
     print("max_shots safety cap =", MAX_SHOTS_SAFETY_CAP)
     print("basis_filter =", BASIS_FILTER)
+    print("relay_bernoulli_gamma =", RELAY_BERNOULLI_GAMMA)
     print("decoders =", decoder_sequence)
     if args.decoder_indices is None:
         print("selected_decoder_indices = all")
@@ -733,7 +792,9 @@ def main() -> None:
     summary_df = pd.DataFrame()
 
     for step_index, decoder_name in selected_decoder_steps:
-        print(f"\n=== Running decoder {step_index}/{len(decoder_sequence)}: {decoder_name} ===")
+        print(
+            f"\n=== Running decoder {step_index}/{len(decoder_sequence)}: {decoder_name} ==="
+        )
         samples = sinter.collect(
             tasks=tasks,
             decoders=[decoder_name],
