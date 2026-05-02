@@ -67,6 +67,8 @@ pub struct BernoulliCemTrainingConfig {
     pub initial_std: f64,
     pub std_floor: f64,
     pub smoothing: f64,
+    pub train_max_logical_failures: Option<usize>,
+    pub validation_max_logical_failures: Option<usize>,
     pub seed: u64,
 }
 
@@ -87,6 +89,8 @@ impl Default for BernoulliCemTrainingConfig {
             initial_std: 1.0,
             std_floor: 0.05,
             smoothing: 0.7,
+            train_max_logical_failures: None,
+            validation_max_logical_failures: None,
             seed: 0,
         }
     }
@@ -116,6 +120,8 @@ pub struct BernoulliEvaluationMetrics {
     pub repeats: usize,
     pub trials: usize,
     pub logical_failures: usize,
+    pub max_logical_failures: Option<usize>,
+    pub stopped_early: bool,
     pub logical_failure_rate: f64,
     pub convergence_rate: f64,
     pub mean_iterations: f64,
@@ -380,6 +386,12 @@ fn validate_training_config(config: &BernoulliCemTrainingConfig) -> Result<(), S
     if !(0.0..=1.0).contains(&config.smoothing) || !config.smoothing.is_finite() {
         return Err("smoothing must be finite and in [0, 1].".to_string());
     }
+    if config.train_max_logical_failures == Some(0) {
+        return Err("train_max_logical_failures must be positive when set.".to_string());
+    }
+    if config.validation_max_logical_failures == Some(0) {
+        return Err("validation_max_logical_failures must be positive when set.".to_string());
+    }
     Ok(())
 }
 
@@ -458,12 +470,18 @@ fn evaluate_params(
         &problem.train_observables
     };
     let repeats = training_config.distribution_repeats.max(1);
+    let max_logical_failures = if validation {
+        training_config.validation_max_logical_failures
+    } else {
+        training_config.train_max_logical_failures
+    };
     let mut logical_failures = 0usize;
     let mut converged = 0usize;
     let mut iterations = 0usize;
     let mut trials = 0usize;
+    let mut stopped_early = false;
 
-    for repeat_idx in 0..repeats {
+    'repeat_loop: for repeat_idx in 0..repeats {
         let repeat_seed = base_seed.wrapping_add(10_007 * repeat_idx as u64);
         let mut decoder = build_decoder(problem, decoder_config, params, repeat_seed);
         for (detectors_row, truth_row) in detectors.axis_iter(Axis(0)).zip(observables.axis_iter(Axis(0))) {
@@ -479,6 +497,12 @@ fn evaluate_params(
             }
             iterations += decode_result.iterations;
             trials += 1;
+            if let Some(limit) = max_logical_failures {
+                if logical_failures >= limit {
+                    stopped_early = true;
+                    break 'repeat_loop;
+                }
+            }
         }
     }
     let trials_f64 = trials.max(1) as f64;
@@ -487,6 +511,8 @@ fn evaluate_params(
         repeats,
         trials,
         logical_failures,
+        max_logical_failures,
+        stopped_early,
         logical_failure_rate: logical_failures as f64 / trials_f64,
         convergence_rate: converged as f64 / trials_f64,
         mean_iterations: iterations as f64 / trials_f64,

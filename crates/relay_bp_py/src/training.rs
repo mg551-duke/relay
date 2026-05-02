@@ -53,6 +53,8 @@ use relay_bp::training::{
     initial_std=1.0,
     std_floor=0.05,
     smoothing=0.7,
+    train_max_logical_failures=None,
+    validation_max_logical_failures=None,
     seed=0,
     resume_state=None,
     progress_callback=None
@@ -98,6 +100,8 @@ pub fn train_relayed_bpgd_bernoulli_memory_py<'py>(
     initial_std: f64,
     std_floor: f64,
     smoothing: f64,
+    train_max_logical_failures: Option<usize>,
+    validation_max_logical_failures: Option<usize>,
     seed: u64,
     resume_state: Option<&Bound<'_, PyDict>>,
     progress_callback: Option<Py<PyAny>>,
@@ -145,6 +149,8 @@ pub fn train_relayed_bpgd_bernoulli_memory_py<'py>(
         initial_std,
         std_floor,
         smoothing,
+        train_max_logical_failures,
+        validation_max_logical_failures,
         seed,
     };
     let resume_state = match resume_state {
@@ -243,10 +249,28 @@ fn metrics_from_any(value: &Bound<'_, PyAny>) -> PyResult<BernoulliEvaluationMet
         repeats: value.get_item("repeats")?.extract()?,
         trials: value.get_item("trials")?.extract()?,
         logical_failures: value.get_item("logical_failures")?.extract()?,
+        max_logical_failures: optional_usize_item(value, "max_logical_failures")?,
+        stopped_early: optional_bool_item(value, "stopped_early")?.unwrap_or(false),
         logical_failure_rate: value.get_item("logical_failure_rate")?.extract()?,
         convergence_rate: value.get_item("convergence_rate")?.extract()?,
         mean_iterations: value.get_item("mean_iterations")?.extract()?,
     })
+}
+
+fn optional_usize_item(value: &Bound<'_, PyAny>, key: &str) -> PyResult<Option<usize>> {
+    match value.get_item(key) {
+        Ok(item) if item.is_none() => Ok(None),
+        Ok(item) => item.extract().map(Some),
+        Err(_) => Ok(None),
+    }
+}
+
+fn optional_bool_item(value: &Bound<'_, PyAny>, key: &str) -> PyResult<Option<bool>> {
+    match value.get_item(key) {
+        Ok(item) if item.is_none() => Ok(None),
+        Ok(item) => item.extract().map(Some),
+        Err(_) => Ok(None),
+    }
 }
 
 fn generation_record_from_any(value: &Bound<'_, PyAny>) -> PyResult<BernoulliGenerationRecord> {
@@ -308,6 +332,8 @@ fn metrics_to_dict<'py>(
     dict.set_item("repeats", metrics.repeats)?;
     dict.set_item("trials", metrics.trials)?;
     dict.set_item("logical_failures", metrics.logical_failures)?;
+    dict.set_item("max_logical_failures", metrics.max_logical_failures)?;
+    dict.set_item("stopped_early", metrics.stopped_early)?;
     dict.set_item("logical_failure_rate", metrics.logical_failure_rate)?;
     dict.set_item("convergence_rate", metrics.convergence_rate)?;
     dict.set_item("mean_iterations", metrics.mean_iterations)?;

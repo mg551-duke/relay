@@ -71,6 +71,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--initial-std", type=float, default=1.0)
     parser.add_argument("--std-floor", type=float, default=0.05)
     parser.add_argument("--smoothing", type=float, default=0.7)
+    parser.add_argument("--train-max-logical-failures", type=int, default=50)
+    parser.add_argument("--validation-max-logical-failures", type=int, default=0)
     parser.add_argument("--no-resume", action="store_true")
     return parser
 
@@ -180,6 +182,8 @@ def main() -> None:
         initial_std=args.initial_std,
         std_floor=args.std_floor,
         smoothing=args.smoothing,
+        train_max_logical_failures=_positive_or_none(args.train_max_logical_failures),
+        validation_max_logical_failures=_positive_or_none(args.validation_max_logical_failures),
         seed=args.seed,
         resume_state=resume_state,
         progress_callback=progress_callback,
@@ -284,6 +288,9 @@ def _write_generation_csv(path: Path, records: list[dict[str, Any]]) -> None:
                 "best_negative": best_params["negative"],
                 "best_positive": best_params["positive"],
                 "best_p_positive": best_params["p_positive"],
+                "best_trials": best_metrics["trials"],
+                "best_logical_failures": best_metrics["logical_failures"],
+                "best_stopped_early": best_metrics["stopped_early"],
                 "best_logical_failure_rate": best_metrics["logical_failure_rate"],
                 "best_mean_iterations": best_metrics["mean_iterations"],
                 "best_convergence_rate": best_metrics["convergence_rate"],
@@ -307,6 +314,10 @@ def _write_json(path: Path, payload: Any) -> None:
 
 def _load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _positive_or_none(value: int) -> int | None:
+    return int(value) if value > 0 else None
 
 
 def _json_ready(value: Any) -> Any:

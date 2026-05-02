@@ -214,11 +214,15 @@ def test_native_bernoulli_training_smoke(repetition_code_config):
         generations=2,
         distribution_repeats=1,
         local_refinement_steps=1,
+        train_max_logical_failures=2,
         seed=5,
     )
 
     params = result["best_candidate"]["params"]
+    metrics = result["best_candidate"]["metrics"]
     assert -0.3 <= params["negative"] <= 0.0
     assert 0.0 <= params["positive"] <= 0.66
     assert 0.001 <= params["p_positive"] <= 0.999
+    assert metrics["max_logical_failures"] == 2
+    assert isinstance(metrics["stopped_early"], bool)
     assert len(result["generation_records"]) == 2
