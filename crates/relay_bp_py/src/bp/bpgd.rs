@@ -14,7 +14,7 @@ use crate::decoder::{get_sprs_bit_matrix_from_python, DecodeResult, DynDecoder};
 use numpy::{IntoPyArray, PyArray1, PyArray2, PyArrayMethods, PyReadonlyArray1, PyReadonlyArray2};
 use pyo3::prelude::*;
 use relay_bp::bp::bpgd::{BPGDDecoder, BPGDDecoderConfig, BPGDFallbackConfig};
-use relay_bp::bp::relay::{RelayDecoderConfig, StoppingCriterion};
+use relay_bp::bp::relay::{GammaSampler, RelayDecoderConfig, StoppingCriterion};
 use relay_bp::decoder::Bit;
 
 #[pyclass(extends=DynDecoder, subclass, module = "bp")]
@@ -104,6 +104,7 @@ impl BPGDDecoderF64 {
                     num_sets: fallback_num_sets,
                     set_max_iter: fallback_set_max_iter,
                     gamma_dist_interval: fallback_gamma_dist_interval,
+                    gamma_sampler: GammaSampler::uniform_interval(fallback_gamma_dist_interval),
                     explicit_gammas: fallback_explicit_gammas
                         .map(|gammas| unsafe { gammas.as_array() }.to_owned()),
                     explicit_c_damp_messages: fallback_explicit_c_damp_messages

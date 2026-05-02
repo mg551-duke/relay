@@ -167,3 +167,58 @@ def test_relayed_bpgd_decode_detailed_repetition_code(repetition_code_config):
     assert list(result.stage_names) == ["relay_leg_0"]
     assert list(result.stage_converged) == [True]
     assert sum(result.stage_iterations) == result.iterations
+
+
+def test_relayed_bpgd_accepts_bernoulli_gamma_sampler(repetition_code_config):
+    decoder = relay_bp.RelayedBPGDDecoderF64(
+        repetition_code_config["check_matrix"],
+        error_priors=repetition_code_config["error_priors"],
+        alpha=1.0,
+        gamma0=0.15,
+        pre_iter=2,
+        num_sets=2,
+        set_max_iter=5,
+        gamma_bernoulli=(-0.2, 0.4, 0.5),
+        decimation_pre_iter=0,
+        r_low=0,
+        r_high=0,
+        seed=3,
+    )
+
+    result = decoder.decode_detailed(np.array([1, 1], dtype=np.uint8))
+
+    assert result.extra_kind == "relayed_bpgd"
+    assert result.iterations > 0
+
+
+def test_native_bernoulli_training_smoke(repetition_code_config):
+    observable_matrix = csc_matrix(np.array([[1, 1, 1]], dtype=np.uint8))
+    train_detectors = np.array([[0, 0], [1, 0], [0, 1], [1, 1]], dtype=np.uint8)
+    train_observables = np.array([[0], [1], [1], [1]], dtype=np.uint8)
+
+    result = relay_bp.train_relayed_bpgd_bernoulli_memory(
+        repetition_code_config["check_matrix"],
+        observable_matrix,
+        repetition_code_config["error_priors"],
+        train_detectors,
+        train_observables,
+        train_detectors,
+        train_observables,
+        alpha=1.0,
+        gamma0=0.15,
+        pre_iter=2,
+        num_sets=2,
+        set_max_iter=5,
+        candidate_count=4,
+        elite_count=2,
+        generations=2,
+        distribution_repeats=1,
+        local_refinement_steps=1,
+        seed=5,
+    )
+
+    params = result["best_candidate"]["params"]
+    assert -0.3 <= params["negative"] <= 0.0
+    assert 0.0 <= params["positive"] <= 0.66
+    assert 0.001 <= params["p_positive"] <= 0.999
+    assert len(result["generation_records"]) == 2

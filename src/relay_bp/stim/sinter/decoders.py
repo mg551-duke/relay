@@ -303,6 +303,7 @@ class SinterDecoder_RelayBP(SinterDecoder_BaseBP):
         num_sets: int = 60,
         set_max_iter: int = 60,
         gamma_dist_interval: tuple[float, float] = (-0.24, 0.66),
+        gamma_bernoulli: tuple[float, float, float] | None = None,
         explicit_gammas: np.ndarray | None = None,
         explicit_edge_message_weights: np.ndarray | None = None,
         explicit_c_damp_messages: np.ndarray | None = None,
@@ -333,6 +334,9 @@ class SinterDecoder_RelayBP(SinterDecoder_BaseBP):
         self.num_sets = num_sets
         self.set_max_iter = set_max_iter
         self.gamma_dist_interval = tuple(gamma_dist_interval)
+        self.gamma_bernoulli = (
+            tuple(gamma_bernoulli) if gamma_bernoulli is not None else None
+        )
         self.explicit_gammas = explicit_gammas
         self.explicit_edge_message_weights = explicit_edge_message_weights
         self.explicit_c_damp_messages = explicit_c_damp_messages
@@ -368,6 +372,7 @@ class SinterDecoder_RelayBP(SinterDecoder_BaseBP):
             num_sets=self.num_sets,
             set_max_iter=self.set_max_iter,
             gamma_dist_interval=self.gamma_dist_interval,
+            gamma_bernoulli=self.gamma_bernoulli,
             explicit_gammas=self.explicit_gammas,
             explicit_edge_message_weights=self.explicit_edge_message_weights,
             explicit_c_damp_messages=self.explicit_c_damp_messages,
@@ -693,6 +698,7 @@ class SinterDecoder_RelayedBPGD(SinterDecoder_BaseBP):
         num_sets: int = 300,
         set_max_iter: int = 60,
         gamma_dist_interval: tuple[float, float] = (-0.24, 0.66),
+        gamma_bernoulli: tuple[float, float, float] | None = None,
         explicit_gammas: np.ndarray | None = None,
         explicit_c_damp_messages: np.ndarray | None = None,
         c_damp_dist_interval: tuple[float, float] | None = None,
@@ -731,6 +737,9 @@ class SinterDecoder_RelayedBPGD(SinterDecoder_BaseBP):
         self.num_sets = num_sets
         self.set_max_iter = set_max_iter
         self.gamma_dist_interval = tuple(gamma_dist_interval)
+        self.gamma_bernoulli = (
+            tuple(gamma_bernoulli) if gamma_bernoulli is not None else None
+        )
         self.explicit_gammas = explicit_gammas
         self.explicit_c_damp_messages = explicit_c_damp_messages
         self.c_damp_dist_interval = (
@@ -774,6 +783,7 @@ class SinterDecoder_RelayedBPGD(SinterDecoder_BaseBP):
             num_sets=self.num_sets,
             set_max_iter=self.set_max_iter,
             gamma_dist_interval=self.gamma_dist_interval,
+            gamma_bernoulli=self.gamma_bernoulli,
             explicit_gammas=self.explicit_gammas,
             explicit_c_damp_messages=self.explicit_c_damp_messages,
             c_damp_dist_interval=self.c_damp_dist_interval,

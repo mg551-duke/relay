@@ -13,7 +13,7 @@ use std::sync::Arc;
 use crate::decoder::{get_sprs_bit_matrix_from_python, DecodeResult, DynDecoder};
 use numpy::{IntoPyArray, PyArray1, PyArray2, PyArrayMethods, PyReadonlyArray1, PyReadonlyArray2};
 use pyo3::prelude::*;
-use relay_bp::bp::relay::{RelayDecoderConfig, StoppingCriterion};
+use relay_bp::bp::relay::{GammaSampler, RelayDecoderConfig, StoppingCriterion};
 use relay_bp::bp::relayed_bpgd::{RelayedBPGDDecoder, RelayedBPGDDecoderConfig};
 use relay_bp::decoder::Bit;
 
@@ -37,6 +37,7 @@ impl RelayedBPGDDecoderF64 {
         num_sets=300,
         set_max_iter=60,
         gamma_dist_interval=(-0.24, 0.66),
+        gamma_bernoulli=None,
         explicit_gammas=None,
         explicit_c_damp_messages=None,
         c_damp_dist_interval=None,
@@ -67,6 +68,7 @@ impl RelayedBPGDDecoderF64 {
         num_sets: usize,
         set_max_iter: usize,
         gamma_dist_interval: (f64, f64),
+        gamma_bernoulli: Option<(f64, f64, f64)>,
         explicit_gammas: Option<&Bound<'_, PyArray2<f64>>>,
         explicit_c_damp_messages: Option<&Bound<'_, PyArray2<f64>>>,
         c_damp_dist_interval: Option<(f64, f64)>,
@@ -98,6 +100,7 @@ impl RelayedBPGDDecoderF64 {
             num_sets,
             set_max_iter,
             gamma_dist_interval,
+            gamma_sampler: gamma_sampler_from_args(gamma_dist_interval, gamma_bernoulli)?,
             explicit_gammas: explicit_gammas
                 .map(|gammas| unsafe { gammas.as_array() }.to_owned()),
             explicit_c_damp_messages: explicit_c_damp_messages
@@ -182,4 +185,19 @@ impl RelayedBPGDDecoderF64 {
             .map(DecodeResult::new)
             .collect()
     }
+}
+
+fn gamma_sampler_from_args(
+    gamma_dist_interval: (f64, f64),
+    gamma_bernoulli: Option<(f64, f64, f64)>,
+) -> PyResult<GammaSampler> {
+    if let Some((negative, positive, p_positive)) = gamma_bernoulli {
+        return GammaSampler::bernoulli_two_point(negative, positive, p_positive)
+            .map_err(pyo3::exceptions::PyValueError::new_err);
+    }
+    let sampler = GammaSampler::uniform_interval(gamma_dist_interval);
+    sampler
+        .validate()
+        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    Ok(sampler)
 }

@@ -35,7 +35,6 @@ use std::sync::Arc;
 #[derive(Clone)]
 struct PosteriorUpdateState {
     rng_std: rand::rngs::StdRng,
-    uniform: rand::distributions::Uniform<f64>,
     c_damp_uniform: Option<rand::distributions::Uniform<f64>>,
 }
 
@@ -90,6 +89,11 @@ pub struct RelayedBPGDDecoder {
 
 impl RelayedBPGDDecoder {
     pub fn new(check_matrix: Arc<SparseBitMatrix>, config: Arc<RelayedBPGDDecoderConfig>) -> Self {
+        config
+            .relay_config
+            .effective_gamma_sampler()
+            .validate()
+            .expect("Invalid relay gamma sampler.");
         assert!(
             !(config.c_damp.is_some()
                 && (config.relay_config.explicit_c_damp_messages.is_some()
@@ -152,16 +156,11 @@ impl RelayedBPGDDecoder {
 
     fn init_relay_state(relay_config: &RelayDecoderConfig) -> PosteriorUpdateState {
         let rng_std = rand::rngs::StdRng::seed_from_u64(relay_config.seed);
-        let uniform = Uniform::new(
-            relay_config.gamma_dist_interval.0,
-            relay_config.gamma_dist_interval.1,
-        );
         let c_damp_uniform = relay_config
             .c_damp_dist_interval
             .map(|(low, high)| Uniform::new(low, high));
         PosteriorUpdateState {
             rng_std,
-            uniform,
             c_damp_uniform,
         }
     }
@@ -196,11 +195,9 @@ impl RelayedBPGDDecoder {
             self.bp_decoder.set_memory_strengths_f64(gammas);
             return;
         }
+        let gamma_sampler = self.config.relay_config.effective_gamma_sampler();
         for gamma in &mut gammas {
-            *gamma = self
-                .posterior_update_state
-                .uniform
-                .sample(&mut self.posterior_update_state.rng_std);
+            *gamma = gamma_sampler.sample(&mut self.posterior_update_state.rng_std);
         }
         self.bp_decoder.set_memory_strengths_f64(gammas);
     }

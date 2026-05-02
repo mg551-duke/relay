@@ -13,4 +13,5 @@ pub mod bp;
 pub mod decoder;
 pub mod dem;
 pub mod observable_decoder;
+pub mod training;
 pub mod utilities;

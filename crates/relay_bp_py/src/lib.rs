@@ -11,6 +11,7 @@
 pub mod bp;
 pub mod decoder;
 pub mod observable_decoder;
+pub mod training;
 
 use pyo3::prelude::*;
 
@@ -20,6 +21,7 @@ fn _relay_bp<'py>(_py: Python<'py>, m: &Bound<'py, PyModule>) -> PyResult<()> {
     decoder::init_decoder(_py, m)?;
     observable_decoder::init_observable_decoder(_py, m)?;
     bp::init_bp(_py, m)?;
+    training::init_training(_py, m)?;
 
     Ok(())
 }

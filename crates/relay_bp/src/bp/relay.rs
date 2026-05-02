@@ -21,6 +21,7 @@ use std::fs::OpenOptions;
 use std::io::{BufWriter, Write};
 //use std::string;
 use rand::distributions::{Distribution, Uniform};
+use rand::Rng;
 use rand::SeedableRng;
 use std::process::exit;
 use std::sync::Arc;
@@ -39,11 +40,100 @@ impl Default for StoppingCriterion {
 }
 
 #[derive(Clone, Debug)]
+pub enum GammaSampler {
+    UniformInterval { low: f64, high: f64 },
+    BernoulliTwoPoint {
+        negative: f64,
+        positive: f64,
+        p_positive: f64,
+    },
+}
+
+impl GammaSampler {
+    pub fn uniform_interval(interval: (f64, f64)) -> Self {
+        Self::UniformInterval {
+            low: interval.0,
+            high: interval.1,
+        }
+    }
+
+    pub fn bernoulli_two_point(
+        negative: f64,
+        positive: f64,
+        p_positive: f64,
+    ) -> Result<Self, String> {
+        let sampler = Self::BernoulliTwoPoint {
+            negative,
+            positive,
+            p_positive,
+        };
+        sampler.validate()?;
+        Ok(sampler)
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        match *self {
+            Self::UniformInterval { low, high } => {
+                if !low.is_finite() || !high.is_finite() {
+                    return Err("gamma interval endpoints must be finite.".to_string());
+                }
+                if high < low {
+                    return Err("gamma interval high must be >= low.".to_string());
+                }
+            }
+            Self::BernoulliTwoPoint {
+                negative,
+                positive,
+                p_positive,
+            } => {
+                if !negative.is_finite() || !positive.is_finite() || !p_positive.is_finite() {
+                    return Err("Bernoulli gamma parameters must be finite.".to_string());
+                }
+                if negative > 0.0 {
+                    return Err("Bernoulli negative gamma value must be <= 0.".to_string());
+                }
+                if positive < 0.0 {
+                    return Err("Bernoulli positive gamma value must be >= 0.".to_string());
+                }
+                if !(0.0..=1.0).contains(&p_positive) {
+                    return Err("Bernoulli p_positive must be in [0, 1].".to_string());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn sample(&self, rng: &mut rand::rngs::StdRng) -> f64 {
+        match *self {
+            Self::UniformInterval { low, high } => {
+                if high <= low {
+                    low
+                } else {
+                    rng.gen_range(low..high)
+                }
+            }
+            Self::BernoulliTwoPoint {
+                negative,
+                positive,
+                p_positive,
+            } => {
+                if rng.gen::<f64>() < p_positive {
+                    positive
+                } else {
+                    negative
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct RelayDecoderConfig {
     pub pre_iter: usize,
     pub num_sets: usize,
     pub set_max_iter: usize,
     pub gamma_dist_interval: (f64, f64),
+    pub gamma_sampler: GammaSampler,
     pub explicit_gammas: Option<Array2<f64>>,
     pub explicit_c_damp_messages: Option<Array2<f64>>,
     pub c_damp_dist_interval: Option<(f64, f64)>,
@@ -60,6 +150,7 @@ impl Default for RelayDecoderConfig {
             num_sets: 300,
             set_max_iter: 60,
             gamma_dist_interval: (-0.24, 0.66),
+            gamma_sampler: GammaSampler::uniform_interval((-0.24, 0.66)),
             explicit_gammas: None,
             explicit_c_damp_messages: None,
             c_damp_dist_interval: None,
@@ -71,10 +162,22 @@ impl Default for RelayDecoderConfig {
     }
 }
 
+impl RelayDecoderConfig {
+    pub fn effective_gamma_sampler(&self) -> GammaSampler {
+        match self.gamma_sampler {
+            GammaSampler::UniformInterval { low, high }
+                if low == -0.24 && high == 0.66 && self.gamma_dist_interval != (-0.24, 0.66) =>
+            {
+                GammaSampler::uniform_interval(self.gamma_dist_interval)
+            }
+            ref sampler => sampler.clone(),
+        }
+    }
+}
+
 #[derive(Clone)]
 struct PosteriorUpdateState {
     rng_std: rand::rngs::StdRng,
-    uniform: rand::distributions::Uniform<f64>,
     c_damp_uniform: Option<rand::distributions::Uniform<f64>>,
 }
 
@@ -118,6 +221,10 @@ where
         min_sum_config: Arc<MinSumDecoderConfig>,
         relay_config: Arc<RelayDecoderConfig>,
     ) -> RelayDecoder<N> {
+        relay_config
+            .effective_gamma_sampler()
+            .validate()
+            .expect("Invalid relay gamma sampler.");
         assert!(
             !(min_sum_config.c_damp.is_some()
                 && (relay_config.explicit_c_damp_messages.is_some()
@@ -135,7 +242,7 @@ where
                 relay_config.pre_iter,
                 relay_config.num_sets,
                 relay_config.set_max_iter,
-                relay_config.gamma_dist_interval,
+                relay_config.effective_gamma_sampler(),
             );
             let mut file =
                 File::create("relay_logging.out").expect("Unable to create file for logging.");
@@ -221,15 +328,11 @@ where
 
     fn init_dismem_state(relay_config: &RelayDecoderConfig) -> PosteriorUpdateState {
         let rng_std: rand::prelude::StdRng = rand::rngs::StdRng::seed_from_u64(relay_config.seed);
-        let low = relay_config.gamma_dist_interval.0;
-        let high = relay_config.gamma_dist_interval.1;
-        let uniform: rand::distributions::Uniform<f64> = Uniform::new(low, high);
         let c_damp_uniform = relay_config
             .c_damp_dist_interval
             .map(|(low, high)| Uniform::new(low, high));
         PosteriorUpdateState {
             rng_std,
-            uniform,
             c_damp_uniform,
         }
     }
@@ -264,11 +367,9 @@ where
             self.bp_decoder.set_memory_strengths_f64(gammas);
             return;
         }
+        let gamma_sampler = self.relay_config.effective_gamma_sampler();
         for i in 0..gammas.len() {
-            gammas[i] = self
-                .posterior_update_state
-                .uniform
-                .sample(&mut self.posterior_update_state.rng_std);
+            gammas[i] = gamma_sampler.sample(&mut self.posterior_update_state.rng_std);
         }
         self.bp_decoder.set_memory_strengths_f64(gammas);
     }
@@ -713,5 +814,23 @@ mod tests {
 
         assert_ne!(before_reset.posterior_ratios, bp_config.log_prior_ratios());
         assert_eq!(after_reset.posterior_ratios, bp_config.log_prior_ratios());
+    }
+
+    #[test]
+    fn bernoulli_gamma_sampler_extremes_are_deterministic() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(123);
+        let always_negative = GammaSampler::bernoulli_two_point(-0.2, 0.4, 0.0).unwrap();
+        let always_positive = GammaSampler::bernoulli_two_point(-0.2, 0.4, 1.0).unwrap();
+        for _ in 0..16 {
+            assert_eq!(always_negative.sample(&mut rng), -0.2);
+            assert_eq!(always_positive.sample(&mut rng), 0.4);
+        }
+    }
+
+    #[test]
+    fn bernoulli_gamma_sampler_rejects_invalid_values() {
+        assert!(GammaSampler::bernoulli_two_point(0.1, 0.4, 0.5).is_err());
+        assert!(GammaSampler::bernoulli_two_point(-0.1, -0.4, 0.5).is_err());
+        assert!(GammaSampler::bernoulli_two_point(-0.1, 0.4, 1.5).is_err());
     }
 }

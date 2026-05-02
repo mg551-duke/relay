@@ -7,9 +7,14 @@
 # Any modifications or derivative works of this code must retain this
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
-"""Base imports for relay bp library."""
+"""Native training helpers exposed from the Rust extension."""
 
-from .bp import *
-from .decoder import *
-from .observable_decoder import *
-from .training import *
+from __future__ import annotations
+
+__all__ = ["train_relayed_bpgd_bernoulli_memory"]
+
+from ._relay_bp import _training  # pylint: disable=E0611
+
+train_relayed_bpgd_bernoulli_memory = (
+    _training.train_relayed_bpgd_bernoulli_memory_py
+)
