@@ -79,9 +79,15 @@ def main() -> None:
     args = build_parser().parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     best_params_path = args.output_dir / "best_params.json"
+    checkpoint_path = args.output_dir / "checkpoint_latest.json"
     if best_params_path.exists() and not args.no_resume:
         print(f"Existing training result found: {best_params_path}")
         return
+    resume_state = None
+    if checkpoint_path.exists() and not args.no_resume:
+        resume_state = _load_json(checkpoint_path)
+        completed = int(resume_state.get("completed_generations", 0))
+        print(f"Resuming from completed generation {completed}.")
 
     circuit_path = _select_circuit(args)
     circuit = stim.Circuit.from_file(circuit_path)
@@ -110,6 +116,31 @@ def main() -> None:
 
     config_payload = _config_payload(args, circuit_path, basis_filter)
     _write_json(args.output_dir / "training_config.json", config_payload)
+
+    def progress_callback(progress: dict[str, Any]) -> None:
+        progress = _json_ready(progress)
+        _write_generation_csv(args.output_dir / "generation_metrics.csv", progress["generation_records"])
+        _write_json(
+            checkpoint_path,
+            {
+                "completed_generations": progress["completed_generations"],
+                "final_raw_mean": progress["final_raw_mean"],
+                "final_raw_std": progress["final_raw_std"],
+                "best_candidate": progress["best_candidate"],
+                "generation_records": progress["generation_records"],
+                "finalized": False,
+            },
+        )
+        print(
+            json.dumps(
+                {
+                    "completed_generations": progress["completed_generations"],
+                    "best_candidate": progress["best_candidate"],
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
 
     result = relay_bp.train_relayed_bpgd_bernoulli_memory(
         check_matrices.check_matrix,
@@ -150,19 +181,23 @@ def main() -> None:
         std_floor=args.std_floor,
         smoothing=args.smoothing,
         seed=args.seed,
+        resume_state=resume_state,
+        progress_callback=progress_callback,
     )
     result = _json_ready(result)
     _write_generation_csv(args.output_dir / "generation_metrics.csv", result["generation_records"])
     _write_json(best_params_path, result["best_candidate"])
     _write_json(args.output_dir / "validation_metrics.json", result["validation_metrics"])
     _write_json(
-        args.output_dir / "checkpoint_latest.json",
+        checkpoint_path,
         {
             "completed_generations": args.generations,
             "final_raw_mean": result["final_raw_mean"],
             "final_raw_std": result["final_raw_std"],
             "best_candidate": result["best_candidate"],
             "validation_metrics": result["validation_metrics"],
+            "generation_records": result["generation_records"],
+            "finalized": True,
         },
     )
     _write_json(args.output_dir / "training_summary.json", result)
@@ -268,6 +303,10 @@ def _write_generation_csv(path: Path, records: list[dict[str, Any]]) -> None:
 
 def _write_json(path: Path, payload: Any) -> None:
     path.write_text(json.dumps(_json_ready(payload), indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _load_json(path: Path) -> Any:
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _json_ready(value: Any) -> Any:

@@ -146,20 +146,80 @@ pub struct BernoulliTrainingResult {
     pub final_raw_std: [f64; 3],
 }
 
+#[derive(Clone, Debug)]
+pub struct BernoulliTrainingResumeState {
+    pub completed_generations: usize,
+    pub raw_mean: [f64; 3],
+    pub raw_std: [f64; 3],
+    pub best_candidate: Option<BernoulliCandidateResult>,
+    pub generation_records: Vec<BernoulliGenerationRecord>,
+}
+
+#[derive(Clone, Debug)]
+pub struct BernoulliTrainingProgress {
+    pub completed_generations: usize,
+    pub generation_record: BernoulliGenerationRecord,
+    pub best_candidate: BernoulliCandidateResult,
+    pub generation_records: Vec<BernoulliGenerationRecord>,
+    pub final_raw_mean: [f64; 3],
+    pub final_raw_std: [f64; 3],
+}
+
 pub fn train_relayed_bpgd_bernoulli_memory(
     problem: BernoulliTrainingProblem,
     decoder_config: RelayedBpgdTrainingDecoderConfig,
     training_config: BernoulliCemTrainingConfig,
 ) -> Result<BernoulliTrainingResult, String> {
+    train_relayed_bpgd_bernoulli_memory_with_progress(
+        problem,
+        decoder_config,
+        training_config,
+        None,
+        None,
+    )
+}
+
+pub fn train_relayed_bpgd_bernoulli_memory_with_progress(
+    problem: BernoulliTrainingProblem,
+    decoder_config: RelayedBpgdTrainingDecoderConfig,
+    training_config: BernoulliCemTrainingConfig,
+    resume_state: Option<BernoulliTrainingResumeState>,
+    mut progress_callback: Option<&mut dyn FnMut(&BernoulliTrainingProgress) -> Result<(), String>>,
+) -> Result<BernoulliTrainingResult, String> {
     validate_problem(&problem)?;
     validate_training_config(&training_config)?;
 
-    let mut raw_mean = [0.0_f64; 3];
-    let mut raw_std = [training_config.initial_std.max(training_config.std_floor); 3];
-    let mut generation_records = Vec::new();
-    let mut best_overall: Option<BernoulliCandidateResult> = None;
+    let start_generation = resume_state
+        .as_ref()
+        .map(|state| state.completed_generations)
+        .unwrap_or(0);
+    if start_generation > training_config.generations {
+        return Err("resume completed_generations exceeds requested generations.".to_string());
+    }
+    let mut raw_mean = resume_state
+        .as_ref()
+        .map(|state| state.raw_mean)
+        .unwrap_or([0.0_f64; 3]);
+    let mut raw_std = resume_state
+        .as_ref()
+        .map(|state| state.raw_std)
+        .unwrap_or([training_config.initial_std.max(training_config.std_floor); 3]);
+    for value in raw_mean.iter().chain(raw_std.iter()) {
+        if !value.is_finite() {
+            return Err("resume raw_mean/raw_std values must be finite.".to_string());
+        }
+    }
+    for value in &mut raw_std {
+        *value = value.max(training_config.std_floor);
+    }
+    let mut generation_records = resume_state
+        .as_ref()
+        .map(|state| state.generation_records.clone())
+        .unwrap_or_default();
+    let mut best_overall: Option<BernoulliCandidateResult> =
+        resume_state.and_then(|state| state.best_candidate);
 
-    for generation in 0..training_config.generations {
+    for generation in start_generation..training_config.generations {
         let candidates = sample_generation_candidates(&raw_mean, &raw_std, generation, &training_config);
         let mut results = evaluate_candidates(
             &problem,
@@ -198,6 +258,20 @@ pub fn train_relayed_bpgd_bernoulli_memory(
             mean_params: params_from_raw(raw_mean, &training_config),
             best_candidate: generation_best,
         });
+        if let (Some(callback), Some(best_candidate), Some(generation_record)) = (
+            progress_callback.as_deref_mut(),
+            best_overall.as_ref(),
+            generation_records.last(),
+        ) {
+            callback(&BernoulliTrainingProgress {
+                completed_generations: generation + 1,
+                generation_record: generation_record.clone(),
+                best_candidate: best_candidate.clone(),
+                generation_records: generation_records.clone(),
+                final_raw_mean: raw_mean,
+                final_raw_std: raw_std,
+            })?;
+        }
     }
 
     let mut best = best_overall.ok_or_else(|| "Training produced no candidate.".to_string())?;

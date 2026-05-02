@@ -7,9 +7,10 @@ use pyo3::types::{PyDict, PyList};
 use relay_bp::bp::relay::StoppingCriterion;
 use relay_bp::decoder::Bit;
 use relay_bp::training::{
-    train_relayed_bpgd_bernoulli_memory, BernoulliCandidateResult,
+    train_relayed_bpgd_bernoulli_memory_with_progress, BernoulliCandidateResult,
     BernoulliCemTrainingConfig, BernoulliEvaluationMetrics, BernoulliGammaParams,
-    BernoulliGenerationRecord, BernoulliTrainingProblem, RelayedBpgdTrainingDecoderConfig,
+    BernoulliGenerationRecord, BernoulliTrainingProblem, BernoulliTrainingProgress,
+    BernoulliTrainingResumeState, RelayedBpgdTrainingDecoderConfig,
 };
 
 #[pyfunction]
@@ -52,7 +53,9 @@ use relay_bp::training::{
     initial_std=1.0,
     std_floor=0.05,
     smoothing=0.7,
-    seed=0
+    seed=0,
+    resume_state=None,
+    progress_callback=None
 ))]
 #[allow(clippy::too_many_arguments)]
 pub fn train_relayed_bpgd_bernoulli_memory_py<'py>(
@@ -96,6 +99,8 @@ pub fn train_relayed_bpgd_bernoulli_memory_py<'py>(
     std_floor: f64,
     smoothing: f64,
     seed: u64,
+    resume_state: Option<&Bound<'_, PyDict>>,
+    progress_callback: Option<Py<PyAny>>,
 ) -> PyResult<Bound<'py, PyDict>> {
     let problem = BernoulliTrainingProblem {
         check_matrix: Arc::new(get_sprs_bit_matrix_from_python(py, check_matrix)?),
@@ -142,8 +147,32 @@ pub fn train_relayed_bpgd_bernoulli_memory_py<'py>(
         smoothing,
         seed,
     };
-    let result = train_relayed_bpgd_bernoulli_memory(problem, decoder_config, training_config)
-        .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    let resume_state = match resume_state {
+        Some(state) => Some(resume_state_from_dict(state)?),
+        None => None,
+    };
+    let mut callback_holder = progress_callback.map(|callback| {
+        move |progress: &BernoulliTrainingProgress| -> Result<(), String> {
+            Python::with_gil(|py| {
+                let payload = progress_to_dict(py, progress).map_err(|err| err.to_string())?;
+                callback
+                    .call1(py, (payload,))
+                    .map_err(|err| err.to_string())?;
+                Ok(())
+            })
+        }
+    });
+    let callback_ref = callback_holder.as_mut().map(|callback| {
+        callback as &mut dyn FnMut(&BernoulliTrainingProgress) -> Result<(), String>
+    });
+    let result = train_relayed_bpgd_bernoulli_memory_with_progress(
+        problem,
+        decoder_config,
+        training_config,
+        resume_state,
+        callback_ref,
+    )
+    .map_err(pyo3::exceptions::PyValueError::new_err)?;
     let payload = PyDict::new(py);
     payload.set_item("best_candidate", candidate_to_dict(py, &result.best_candidate)?)?;
     payload.set_item(
@@ -154,6 +183,96 @@ pub fn train_relayed_bpgd_bernoulli_memory_py<'py>(
     payload.set_item("final_raw_mean", result.final_raw_mean.to_vec())?;
     payload.set_item("final_raw_std", result.final_raw_std.to_vec())?;
     Ok(payload)
+}
+
+fn resume_state_from_dict(dict: &Bound<'_, PyDict>) -> PyResult<BernoulliTrainingResumeState> {
+    let completed_generations = required_item(dict, "completed_generations")?.extract()?;
+    let raw_mean = extract_triplet(&required_item(dict, "final_raw_mean")?, "final_raw_mean")?;
+    let raw_std = extract_triplet(&required_item(dict, "final_raw_std")?, "final_raw_std")?;
+    let best_candidate = match dict.get_item("best_candidate")? {
+        Some(item) => Some(candidate_from_any(&item)?),
+        None => None,
+    };
+    let generation_records = match dict.get_item("generation_records")? {
+        Some(item) => generation_records_from_any(&item)?,
+        None => Vec::new(),
+    };
+    Ok(BernoulliTrainingResumeState {
+        completed_generations,
+        raw_mean,
+        raw_std,
+        best_candidate,
+        generation_records,
+    })
+}
+
+fn required_item<'py>(dict: &Bound<'py, PyDict>, key: &str) -> PyResult<Bound<'py, PyAny>> {
+    dict.get_item(key)?.ok_or_else(|| {
+        pyo3::exceptions::PyValueError::new_err(format!("resume_state missing {key:?}"))
+    })
+}
+
+fn extract_triplet(value: &Bound<'_, PyAny>, label: &str) -> PyResult<[f64; 3]> {
+    let values: Vec<f64> = value.extract()?;
+    if values.len() != 3 {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "{label} must contain exactly three values"
+        )));
+    }
+    Ok([values[0], values[1], values[2]])
+}
+
+fn candidate_from_any(value: &Bound<'_, PyAny>) -> PyResult<BernoulliCandidateResult> {
+    let raw_params = extract_triplet(&value.get_item("raw_params")?, "raw_params")?;
+    let params_any = value.get_item("params")?;
+    let metrics_any = value.get_item("metrics")?;
+    Ok(BernoulliCandidateResult {
+        raw_params,
+        params: BernoulliGammaParams {
+            negative: params_any.get_item("negative")?.extract()?,
+            positive: params_any.get_item("positive")?.extract()?,
+            p_positive: params_any.get_item("p_positive")?.extract()?,
+        },
+        metrics: metrics_from_any(&metrics_any)?,
+    })
+}
+
+fn metrics_from_any(value: &Bound<'_, PyAny>) -> PyResult<BernoulliEvaluationMetrics> {
+    Ok(BernoulliEvaluationMetrics {
+        shots: value.get_item("shots")?.extract()?,
+        repeats: value.get_item("repeats")?.extract()?,
+        trials: value.get_item("trials")?.extract()?,
+        logical_failures: value.get_item("logical_failures")?.extract()?,
+        logical_failure_rate: value.get_item("logical_failure_rate")?.extract()?,
+        convergence_rate: value.get_item("convergence_rate")?.extract()?,
+        mean_iterations: value.get_item("mean_iterations")?.extract()?,
+    })
+}
+
+fn generation_record_from_any(value: &Bound<'_, PyAny>) -> PyResult<BernoulliGenerationRecord> {
+    let raw_mean = extract_triplet(&value.get_item("raw_mean")?, "raw_mean")?;
+    let raw_std = extract_triplet(&value.get_item("raw_std")?, "raw_std")?;
+    let mean_params_any = value.get_item("mean_params")?;
+    Ok(BernoulliGenerationRecord {
+        generation: value.get_item("generation")?.extract()?,
+        raw_mean,
+        raw_std,
+        mean_params: BernoulliGammaParams {
+            negative: mean_params_any.get_item("negative")?.extract()?,
+            positive: mean_params_any.get_item("positive")?.extract()?,
+            p_positive: mean_params_any.get_item("p_positive")?.extract()?,
+        },
+        best_candidate: candidate_from_any(&value.get_item("best_candidate")?)?,
+    })
+}
+
+fn generation_records_from_any(value: &Bound<'_, PyAny>) -> PyResult<Vec<BernoulliGenerationRecord>> {
+    let list = value.downcast::<PyList>()?;
+    let mut records = Vec::with_capacity(list.len());
+    for item in list.iter() {
+        records.push(generation_record_from_any(&item)?);
+    }
+    Ok(records)
 }
 
 fn parse_stopping_criterion(value: &str, stop_nconv: usize) -> StoppingCriterion {
@@ -228,6 +347,26 @@ fn generation_records_to_list<'py>(
         list.append(generation_record_to_dict(py, record)?)?;
     }
     Ok(list)
+}
+
+fn progress_to_dict<'py>(
+    py: Python<'py>,
+    progress: &BernoulliTrainingProgress,
+) -> PyResult<Bound<'py, PyDict>> {
+    let dict = PyDict::new(py);
+    dict.set_item("completed_generations", progress.completed_generations)?;
+    dict.set_item(
+        "generation_record",
+        generation_record_to_dict(py, &progress.generation_record)?,
+    )?;
+    dict.set_item("best_candidate", candidate_to_dict(py, &progress.best_candidate)?)?;
+    dict.set_item(
+        "generation_records",
+        generation_records_to_list(py, &progress.generation_records)?,
+    )?;
+    dict.set_item("final_raw_mean", progress.final_raw_mean.to_vec())?;
+    dict.set_item("final_raw_std", progress.final_raw_std.to_vec())?;
+    Ok(dict)
 }
 
 #[pymodule]
