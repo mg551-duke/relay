@@ -4,11 +4,14 @@
 This is a circuit-level performance runner for the
 `bicycle_bivariate_144_12_12_memory_Z` family using Z-basis detector filtering.
 It is modeled on `run_bivariate_bicycle144_12_12_native_bpgd_cluster_Z_basis.py`
-but focuses on three Relay-BP-5 variants:
+but focuses on six Relay-BP-5 variants:
 
 1. Relay-BP-5 without damping
 2. Relay-BP-5 with random damping in [0.85, 0.95]
 3. Relay-BP-5 with trained two-point discrete memory
+4. Relay-BP-5 with trained two-point discrete memory and damping 0.9
+5. Relay-BP-5 with trained two-point discrete memory and damping in [0.85, 0.95]
+6. Relay-BP-5 with continuous interval memory and damping 0.9
 
 Shared decoder settings:
 - p sweep: 0.001, 0.002, 0.003, 0.004, 0.005
@@ -70,6 +73,7 @@ RELAY_SET_MAX_ITER = 60
 RELAY_GAMMA_DIST_INTERVAL = (-0.24, 0.66)
 RELAY_STOP_NCONV = 5
 RELAY_POSTERIORS = True
+RELAY_FIXED_DAMPING = 0.9
 RELAY_DAMPING_INTERVAL = (0.85, 0.95)
 # Native wrapper order: (negative, positive, p_positive).
 RELAY_BERNOULLI_GAMMA = (
@@ -83,6 +87,9 @@ DEFAULT_DECODER_SEQUENCE = [
     "relay-bp5-r601-no-damping",
     "relay-bp5-r601-damp085-095",
     "relay-bp5-r601-discrete-memory",
+    "relay-bp5-r601-discrete-memory-damp0p9",
+    "relay-bp5-r601-discrete-memory-damp085-095",
+    "relay-bp5-r601-damp0p9",
 ]
 DEFAULT_DECODER_INDICES: list[int] | None = None
 DEFAULT_MAX_BATCH_SIZE = 64
@@ -183,6 +190,32 @@ class RelayBPIterationSampler(Sampler):
 
     def compiled_sampler_for_task(self, task: sinter.Task) -> CompiledSampler:
         return CompiledRelayBPIterationSampler(decoder=self.decoder, task=task)
+
+
+class SinterDecoder_RelayBPFixedDamping(SinterDecoder_RelayBP):
+    """Relay-BP decoder using a scalar edge-message damping value on every leg."""
+
+    def __init__(self, *, c_damp: float, **kwargs: Any):
+        if kwargs.get("explicit_c_damp_messages") is not None:
+            raise ValueError("Fixed damping cannot be combined with explicit damping.")
+        if kwargs.get("c_damp_dist_interval") is not None:
+            raise ValueError("Fixed damping cannot be combined with damping interval.")
+        if not math.isfinite(c_damp) or not 0.0 <= c_damp <= 1.0:
+            raise ValueError(f"Expected damping coefficient in [0, 1], got {c_damp}.")
+        self.fixed_c_damp = float(c_damp)
+        super().__init__(**kwargs)
+
+    def build_observable_decoder(self, check_matrices: CheckMatrices):
+        old_explicit_c_damp_messages = self.explicit_c_damp_messages
+        self.explicit_c_damp_messages = np.full(
+            (int(self.num_sets) + 1, int(check_matrices.check_matrix.nnz)),
+            self.fixed_c_damp,
+            dtype=np.float64,
+        )
+        try:
+            return super().build_observable_decoder(check_matrices)
+        finally:
+            self.explicit_c_damp_messages = old_explicit_c_damp_messages
 
 
 class CompiledRelayBPIterationSampler(CompiledSampler):
@@ -345,6 +378,32 @@ def build_custom_decoders() -> dict[str, Sampler]:
                 gamma_bernoulli=RELAY_BERNOULLI_GAMMA,
                 seed=RELAY_BASE_SEED + 2,
                 decoder_label="relay-bp5-r601-discrete-memory",
+            )
+        ),
+        "relay-bp5-r601-discrete-memory-damp0p9": RelayBPIterationSampler(
+            decoder=SinterDecoder_RelayBPFixedDamping(
+                **common,
+                gamma_bernoulli=RELAY_BERNOULLI_GAMMA,
+                c_damp=RELAY_FIXED_DAMPING,
+                seed=RELAY_BASE_SEED + 3,
+                decoder_label="relay-bp5-r601-discrete-memory-damp0p9",
+            )
+        ),
+        "relay-bp5-r601-discrete-memory-damp085-095": RelayBPIterationSampler(
+            decoder=SinterDecoder_RelayBP(
+                **common,
+                gamma_bernoulli=RELAY_BERNOULLI_GAMMA,
+                c_damp_dist_interval=RELAY_DAMPING_INTERVAL,
+                seed=RELAY_BASE_SEED + 4,
+                decoder_label="relay-bp5-r601-discrete-memory-damp085-095",
+            )
+        ),
+        "relay-bp5-r601-damp0p9": RelayBPIterationSampler(
+            decoder=SinterDecoder_RelayBPFixedDamping(
+                **common,
+                c_damp=RELAY_FIXED_DAMPING,
+                seed=RELAY_BASE_SEED + 5,
+                decoder_label="relay-bp5-r601-damp0p9",
             )
         ),
     }
@@ -567,6 +626,7 @@ def build_setup_dict(
         "relay_gamma_dist_interval": list(RELAY_GAMMA_DIST_INTERVAL),
         "relay_stop_nconv": int(RELAY_STOP_NCONV),
         "relay_posteriors": bool(RELAY_POSTERIORS),
+        "relay_fixed_damping": float(RELAY_FIXED_DAMPING),
         "relay_damping_interval": list(RELAY_DAMPING_INTERVAL),
         "relay_bernoulli_gamma": list(RELAY_BERNOULLI_GAMMA),
         "decoder_sequence": list(decoder_sequence),
@@ -616,6 +676,11 @@ def validate_resume_setup(setup_json_path: Path, current_setup: dict[str, Any]) 
         "relay_bernoulli_gamma"
     ) != current_setup.get("relay_bernoulli_gamma"):
         mismatches.append("relay_bernoulli_gamma")
+
+    if "relay_fixed_damping" in existing_setup and existing_setup.get(
+        "relay_fixed_damping"
+    ) != current_setup.get("relay_fixed_damping"):
+        mismatches.append("relay_fixed_damping")
 
     if mismatches:
         mismatch_text = ", ".join(mismatches)
@@ -781,6 +846,7 @@ def main() -> None:
     print("errors_by_p =", ERRORS_BY_P)
     print("max_shots safety cap =", MAX_SHOTS_SAFETY_CAP)
     print("basis_filter =", BASIS_FILTER)
+    print("relay_fixed_damping =", RELAY_FIXED_DAMPING)
     print("relay_bernoulli_gamma =", RELAY_BERNOULLI_GAMMA)
     print("decoders =", decoder_sequence)
     if args.decoder_indices is None:
