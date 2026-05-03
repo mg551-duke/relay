@@ -13,6 +13,9 @@ but focuses on six Relay-BP-5 variants:
 5. Relay-BP-5 with trained two-point discrete memory and damping in [0.85, 0.95]
 6. Relay-BP-5 with continuous interval memory and damping 0.9
 
+Two optional static-assignment decoders can be appended with
+`--static-discrete-gammas-path` and `--static-continuous-gammas-path`.
+
 Shared decoder settings:
 - p sweep: 0.001, 0.002, 0.003, 0.004, 0.005
 - max logical errors per p: 50
@@ -31,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import hashlib
 import json
 import multiprocessing
 import os
@@ -90,6 +94,8 @@ DEFAULT_DECODER_SEQUENCE = [
     "relay-bp5-r601-discrete-memory-damp085-095",
     "relay-bp5-r601-damp0p9",
 ]
+STATIC_DISCRETE_DECODER_NAME = "relay-bp5-r601-static-discrete-memory"
+STATIC_CONTINUOUS_DECODER_NAME = "relay-bp5-r601-static-continuous-memory"
 DEFAULT_DECODER_INDICES: list[int] | None = None
 DEFAULT_MAX_BATCH_SIZE = 64
 
@@ -130,6 +136,35 @@ def parse_float_csv(text: str | None) -> list[float] | None:
     if not values:
         raise ValueError("Expected at least one float value.")
     return values
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def load_static_gammas(path: Path | None) -> tuple[np.ndarray | None, dict[str, Any] | None]:
+    if path is None:
+        return None, None
+    resolved = path.resolve()
+    gammas = np.asarray(np.load(resolved), dtype=np.float64)
+    if gammas.ndim == 1:
+        gammas = gammas.reshape(1, -1)
+    if gammas.ndim != 2 or gammas.shape[0] != 1:
+        raise ValueError(
+            f"Static gamma artifact must be 1D or shape (1, n_variables); got {gammas.shape} from {resolved}."
+        )
+    if not np.all(np.isfinite(gammas)):
+        raise ValueError(f"Static gamma artifact contains non-finite values: {resolved}")
+    metadata = {
+        "path": str(resolved),
+        "shape": [int(dim) for dim in gammas.shape],
+        "sha256": file_sha256(resolved),
+    }
+    return gammas, metadata
 
 
 def find_circuits(circuits_dir: Path, selected_p_values: list[float]) -> list[Path]:
@@ -314,7 +349,11 @@ class CompiledRelayBPIterationSampler(CompiledSampler):
         )
 
 
-def build_custom_decoders() -> dict[str, Sampler]:
+def build_custom_decoders(
+    *,
+    static_discrete_gammas: np.ndarray | None = None,
+    static_continuous_gammas: np.ndarray | None = None,
+) -> dict[str, Sampler]:
     common = dict(
         alpha=RELAY_ALPHA,
         gamma0=RELAY_GAMMA0,
@@ -329,7 +368,7 @@ def build_custom_decoders() -> dict[str, Sampler]:
         show_progress=False,
         leave_progress_bar_on_finish=False,
     )
-    return {
+    decoders: dict[str, Sampler] = {
         "relay-bp5-r601-no-damping": RelayBPIterationSampler(
             decoder=SinterDecoder_RelayBP(
                 **common,
@@ -380,6 +419,25 @@ def build_custom_decoders() -> dict[str, Sampler]:
             )
         ),
     }
+    if static_discrete_gammas is not None:
+        decoders[STATIC_DISCRETE_DECODER_NAME] = RelayBPIterationSampler(
+            decoder=SinterDecoder_RelayBP(
+                **common,
+                explicit_gammas=static_discrete_gammas,
+                seed=RELAY_BASE_SEED + 6,
+                decoder_label=STATIC_DISCRETE_DECODER_NAME,
+            )
+        )
+    if static_continuous_gammas is not None:
+        decoders[STATIC_CONTINUOUS_DECODER_NAME] = RelayBPIterationSampler(
+            decoder=SinterDecoder_RelayBP(
+                **common,
+                explicit_gammas=static_continuous_gammas,
+                seed=RELAY_BASE_SEED + 7,
+                decoder_label=STATIC_CONTINUOUS_DECODER_NAME,
+            )
+        )
+    return decoders
 
 
 def samples_to_df(samples: list[sinter.TaskStats]) -> pd.DataFrame:
@@ -580,6 +638,8 @@ def build_setup_dict(
     decoder_sequence: list[str],
     num_workers: int,
     max_batch_size: int,
+    static_discrete_gammas_metadata: dict[str, Any] | None,
+    static_continuous_gammas_metadata: dict[str, Any] | None,
 ) -> dict[str, Any]:
     return {
         "repo_root": str(repo_root),
@@ -602,6 +662,8 @@ def build_setup_dict(
         "relay_fixed_damping": float(RELAY_FIXED_DAMPING),
         "relay_damping_interval": list(RELAY_DAMPING_INTERVAL),
         "relay_bernoulli_gamma": list(RELAY_BERNOULLI_GAMMA),
+        "static_discrete_gammas": static_discrete_gammas_metadata,
+        "static_continuous_gammas": static_continuous_gammas_metadata,
         "decoder_sequence": list(decoder_sequence),
         "num_workers": int(num_workers),
         "max_batch_size": int(max_batch_size),
@@ -654,6 +716,10 @@ def validate_resume_setup(setup_json_path: Path, current_setup: dict[str, Any]) 
         "relay_fixed_damping"
     ) != current_setup.get("relay_fixed_damping"):
         mismatches.append("relay_fixed_damping")
+
+    for field in ["static_discrete_gammas", "static_continuous_gammas"]:
+        if field in existing_setup and existing_setup.get(field) != current_setup.get(field):
+            mismatches.append(field)
 
     if mismatches:
         mismatch_text = ", ".join(mismatches)
@@ -715,7 +781,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--decoders",
         nargs="+",
-        default=DEFAULT_DECODER_SEQUENCE,
+        default=None,
         help="Subset or reordered decoder names to run.",
     )
     parser.add_argument(
@@ -739,6 +805,18 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=DEFAULT_MAX_BATCH_SIZE,
         help="Maximum sinter batch size per worker. Lower this if detailed decoding uses too much memory.",
+    )
+    parser.add_argument(
+        "--static-discrete-gammas-path",
+        type=Path,
+        default=None,
+        help="Optional .npy static discrete gamma artifact to add as a comparison decoder.",
+    )
+    parser.add_argument(
+        "--static-continuous-gammas-path",
+        type=Path,
+        default=None,
+        help="Optional .npy static continuous gamma artifact to add as a comparison decoder.",
     )
     return parser.parse_args()
 
@@ -775,8 +853,23 @@ def main() -> None:
             if path.exists():
                 path.unlink()
 
-    custom_decoders = build_custom_decoders()
-    decoder_sequence = args.decoders
+    static_discrete_gammas, static_discrete_gammas_metadata = load_static_gammas(
+        args.static_discrete_gammas_path
+    )
+    static_continuous_gammas, static_continuous_gammas_metadata = load_static_gammas(
+        args.static_continuous_gammas_path
+    )
+
+    custom_decoders = build_custom_decoders(
+        static_discrete_gammas=static_discrete_gammas,
+        static_continuous_gammas=static_continuous_gammas,
+    )
+    default_decoder_sequence = list(DEFAULT_DECODER_SEQUENCE)
+    if static_discrete_gammas is not None:
+        default_decoder_sequence.append(STATIC_DISCRETE_DECODER_NAME)
+    if static_continuous_gammas is not None:
+        default_decoder_sequence.append(STATIC_CONTINUOUS_DECODER_NAME)
+    decoder_sequence = args.decoders or default_decoder_sequence
     unknown = [name for name in decoder_sequence if name not in custom_decoders]
     if unknown:
         raise KeyError(f"Unknown decoders requested: {unknown}")
@@ -805,6 +898,8 @@ def main() -> None:
         decoder_sequence=decoder_sequence,
         num_workers=num_workers,
         max_batch_size=max_batch_size,
+        static_discrete_gammas_metadata=static_discrete_gammas_metadata,
+        static_continuous_gammas_metadata=static_continuous_gammas_metadata,
     )
     validate_resume_setup(setup_json, setup)
     setup_json.write_text(json.dumps(setup, indent=2, sort_keys=True), encoding="utf-8")
@@ -821,6 +916,8 @@ def main() -> None:
     print("basis_filter =", BASIS_FILTER)
     print("relay_fixed_damping =", RELAY_FIXED_DAMPING)
     print("relay_bernoulli_gamma =", RELAY_BERNOULLI_GAMMA)
+    print("static_discrete_gammas =", static_discrete_gammas_metadata)
+    print("static_continuous_gammas =", static_continuous_gammas_metadata)
     print("decoders =", decoder_sequence)
     if args.decoder_indices is None:
         print("selected_decoder_indices = all")
