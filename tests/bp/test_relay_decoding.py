@@ -84,6 +84,26 @@ def test_decode_detailed_with_disordered_edge_damping_interval(repetition_code_c
     assert 0.5 <= result.damping_min <= result.damping_max <= 1.0
 
 
+def test_decode_detailed_with_scalar_damping(repetition_code_config):
+    repetition_code_config.pop("max_iter", None)
+    decoder = relay_bp.RelayDecoderF64(
+        **repetition_code_config,
+        pre_iter=20,
+        num_sets=2,
+        set_max_iter=10,
+        gamma0=0.15,
+        c_damp=0.9,
+        seed=7,
+    )
+
+    result = decoder.decode_detailed(np.array([1, 1], dtype=np.uint8))
+
+    assert result.success
+    assert result.damping_mode == "scalar"
+    assert result.damping_min == pytest.approx(0.9)
+    assert result.damping_max == pytest.approx(0.9)
+
+
 def test_decode_detailed_with_explicit_edge_damping_messages(repetition_code_config):
     repetition_code_config.pop("max_iter", None)
     nnz = repetition_code_config["check_matrix"].nnz

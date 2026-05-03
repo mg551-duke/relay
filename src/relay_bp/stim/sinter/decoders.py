@@ -72,7 +72,9 @@ class SinterCompiledDecoder_BP(CompiledDecoder):
         self.leave_progress_bar_on_finish = leave_progress_bar_on_finish
         self.decoder_label = decoder_label
         self.record_details = record_details
-        self.details_dir = pathlib.Path(details_dir) if details_dir is not None else None
+        self.details_dir = (
+            pathlib.Path(details_dir) if details_dir is not None else None
+        )
         self.dem_hash = dem_hash or "unknown_dem"
         self._detail_path: pathlib.Path | None = None
 
@@ -96,15 +98,21 @@ class SinterCompiledDecoder_BP(CompiledDecoder):
             "converged": bool(detail.converged),
             "iterations": int(detail.iterations),
             "observables": np.asarray(detail.observables, dtype=np.uint8).tolist(),
-            "damping_mode": detail.physical_decode_result.damping_mode
-            if detail.physical_decode_result is not None
-            else "none",
-            "damping_min": detail.physical_decode_result.damping_min
-            if detail.physical_decode_result is not None
-            else None,
-            "damping_max": detail.physical_decode_result.damping_max
-            if detail.physical_decode_result is not None
-            else None,
+            "damping_mode": (
+                detail.physical_decode_result.damping_mode
+                if detail.physical_decode_result is not None
+                else "none"
+            ),
+            "damping_min": (
+                detail.physical_decode_result.damping_min
+                if detail.physical_decode_result is not None
+                else None
+            ),
+            "damping_max": (
+                detail.physical_decode_result.damping_max
+                if detail.physical_decode_result is not None
+                else None
+            ),
         }
         if physical is None:
             record.update(
@@ -126,14 +134,18 @@ class SinterCompiledDecoder_BP(CompiledDecoder):
                 "physical_success": bool(physical.success),
                 "physical_iterations": int(physical.iterations),
                 "decoding": np.asarray(physical.decoding, dtype=np.uint8).tolist(),
-                "decoded_detectors": np.asarray(physical.decoded_detectors, dtype=np.uint8).tolist(),
+                "decoded_detectors": np.asarray(
+                    physical.decoded_detectors, dtype=np.uint8
+                ).tolist(),
                 "fallback_used": physical.fallback_used,
                 "converged_stage_index": physical.converged_stage_index,
                 "stage_names": list(physical.stage_names),
                 "stage_iterations": list(physical.stage_iterations),
                 "stage_converged": list(physical.stage_converged),
                 "stage_damping_modes": list(physical.stage_damping_modes),
-                "posterior_norm": float(np.linalg.norm(posterior)) if posterior.size else 0.0,
+                "posterior_norm": (
+                    float(np.linalg.norm(posterior)) if posterior.size else 0.0
+                ),
             }
         )
         return record
@@ -149,14 +161,19 @@ class SinterCompiledDecoder_BP(CompiledDecoder):
 
     def _decode_predictions(self, syndromes: np.ndarray) -> np.ndarray:
         if self.record_details or self.details_dir is not None:
-            detailed_results = self.observable_decoder.decode_observables_detailed_batch(
-                syndromes,
-                parallel=self.parallel,
-                progress_bar=self.show_progress,
-                leave_progress_bar_on_finish=self.leave_progress_bar_on_finish,
+            detailed_results = (
+                self.observable_decoder.decode_observables_detailed_batch(
+                    syndromes,
+                    parallel=self.parallel,
+                    progress_bar=self.show_progress,
+                    leave_progress_bar_on_finish=self.leave_progress_bar_on_finish,
+                )
             )
             predictions = np.asarray(
-                [np.asarray(detail.observables, dtype=np.uint8) for detail in detailed_results],
+                [
+                    np.asarray(detail.observables, dtype=np.uint8)
+                    for detail in detailed_results
+                ],
                 dtype=np.uint8,
             )
             self._write_detail_records(detailed_results)
@@ -306,6 +323,7 @@ class SinterDecoder_RelayBP(SinterDecoder_BaseBP):
         gamma_bernoulli: tuple[float, float, float] | None = None,
         explicit_gammas: np.ndarray | None = None,
         explicit_edge_message_weights: np.ndarray | None = None,
+        c_damp: float | None = None,
         explicit_c_damp_messages: np.ndarray | None = None,
         c_damp_dist_interval: tuple[float, float] | None = None,
         relay_posteriors: bool = True,
@@ -325,6 +343,7 @@ class SinterDecoder_RelayBP(SinterDecoder_BaseBP):
     ):
         _validate_damping_sources(
             decoder_label=decoder_label or "relay-bp",
+            c_damp=c_damp,
             explicit_c_damp_messages=explicit_c_damp_messages,
             c_damp_dist_interval=c_damp_dist_interval,
         )
@@ -339,6 +358,7 @@ class SinterDecoder_RelayBP(SinterDecoder_BaseBP):
         )
         self.explicit_gammas = explicit_gammas
         self.explicit_edge_message_weights = explicit_edge_message_weights
+        self.c_damp = c_damp
         self.explicit_c_damp_messages = explicit_c_damp_messages
         self.c_damp_dist_interval = (
             tuple(c_damp_dist_interval) if c_damp_dist_interval is not None else None
@@ -375,6 +395,7 @@ class SinterDecoder_RelayBP(SinterDecoder_BaseBP):
             gamma_bernoulli=self.gamma_bernoulli,
             explicit_gammas=self.explicit_gammas,
             explicit_edge_message_weights=self.explicit_edge_message_weights,
+            c_damp=self.c_damp,
             explicit_c_damp_messages=self.explicit_c_damp_messages,
             c_damp_dist_interval=self.c_damp_dist_interval,
             relay_posteriors=self.relay_posteriors,
@@ -386,7 +407,8 @@ class SinterDecoder_RelayBP(SinterDecoder_BaseBP):
         return relay_bp.ObservableDecoderRunner(
             decoder,
             check_matrices.observables_matrix,
-            include_decode_result=self.include_decode_result or self.details_dir is not None,
+            include_decode_result=self.include_decode_result
+            or self.details_dir is not None,
         )
 
 
@@ -445,7 +467,8 @@ class SinterDecoder_MemBP(SinterDecoder_BaseBP):
         return relay_bp.ObservableDecoderRunner(
             decoder,
             check_matrices.observables_matrix,
-            include_decode_result=self.include_decode_result or self.details_dir is not None,
+            include_decode_result=self.include_decode_result
+            or self.details_dir is not None,
         )
 
 
@@ -496,7 +519,8 @@ class SinterDecoder_MSLBP(SinterDecoder_BaseBP):
         return relay_bp.ObservableDecoderRunner(
             decoder,
             check_matrices.observables_matrix,
-            include_decode_result=self.include_decode_result or self.details_dir is not None,
+            include_decode_result=self.include_decode_result
+            or self.details_dir is not None,
         )
 
 
@@ -554,7 +578,8 @@ class SinterDecoder_DampedBP(SinterDecoder_BaseBP):
         return relay_bp.ObservableDecoderRunner(
             decoder,
             check_matrices.observables_matrix,
-            include_decode_result=self.include_decode_result or self.details_dir is not None,
+            include_decode_result=self.include_decode_result
+            or self.details_dir is not None,
         )
 
 
@@ -806,7 +831,9 @@ class SinterDecoder_RelayedBPGD(SinterDecoder_BaseBP):
         )
 
 
-def _common_decoder_kwargs(decoder_kwargs: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+def _common_decoder_kwargs(
+    decoder_kwargs: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
     common_keys = {
         "parallel",
         "decomposed_hyperedges",
@@ -818,7 +845,9 @@ def _common_decoder_kwargs(decoder_kwargs: dict[str, Any]) -> tuple[dict[str, An
         "details_dir",
     }
     common = {key: decoder_kwargs[key] for key in common_keys if key in decoder_kwargs}
-    specific = {key: value for key, value in decoder_kwargs.items() if key not in common_keys}
+    specific = {
+        key: value for key, value in decoder_kwargs.items() if key not in common_keys
+    }
     return common, specific
 
 
@@ -860,7 +889,9 @@ def decoder_from_spec(spec: dict[str, Any], **decoder_kwargs: Any) -> Decoder:
                 "t_high": int(params.get("t_high", params.get("T_high", 5))),
                 "alpha": params.get("alpha", None),
                 "c_damp": params.get("c_damp", None),
-                "explicit_c_damp_messages": params.get("explicit_c_damp_messages", None),
+                "explicit_c_damp_messages": params.get(
+                    "explicit_c_damp_messages", None
+                ),
                 "random_decimation_candidates": int(
                     params.get("random_decimation_candidates", 1)
                 ),
@@ -878,9 +909,13 @@ def decoder_from_spec(spec: dict[str, Any], **decoder_kwargs: Any) -> Decoder:
                 "pre_iter": int(params.get("pre_iter", 80)),
                 "num_sets": int(params.get("num_sets", 300)),
                 "set_max_iter": int(params.get("set_max_iter", 60)),
-                "gamma_dist_interval": tuple(params.get("gamma_dist_interval", (-0.24, 0.66))),
+                "gamma_dist_interval": tuple(
+                    params.get("gamma_dist_interval", (-0.24, 0.66))
+                ),
                 "explicit_gammas": params.get("explicit_gammas", None),
-                "explicit_c_damp_messages": params.get("explicit_c_damp_messages", None),
+                "explicit_c_damp_messages": params.get(
+                    "explicit_c_damp_messages", None
+                ),
                 "c_damp_dist_interval": params.get("c_damp_dist_interval", None),
                 "relay_posteriors": bool(params.get("relay_posteriors", True)),
                 "stop_nconv": int(params.get("stop_nconv", 5)),
@@ -888,7 +923,9 @@ def decoder_from_spec(spec: dict[str, Any], **decoder_kwargs: Any) -> Decoder:
                 "logging": bool(params.get("logging", False)),
                 "seed": int(params.get("seed", 0)),
                 "decimation_pre_iter": int(
-                    params.get("decimation_pre_iter", params.get("Decimation_PRE_ITER", 0))
+                    params.get(
+                        "decimation_pre_iter", params.get("Decimation_PRE_ITER", 0)
+                    )
                 ),
                 "initial_decimation_percentage": float(
                     params.get("initial_decimation_percentage", 0.0)
@@ -941,7 +978,9 @@ def decoder_from_spec(spec: dict[str, Any], **decoder_kwargs: Any) -> Decoder:
             alpha=params.get("alpha", None),
             c_damp=params.get("c_damp", None),
             explicit_c_damp_messages=params.get("explicit_c_damp_messages", None),
-            random_decimation_candidates=int(params.get("random_decimation_candidates", 1)),
+            random_decimation_candidates=int(
+                params.get("random_decimation_candidates", 1)
+            ),
             random_seed=int(params.get("random_seed", 0)),
             **common,
         )
@@ -958,10 +997,7 @@ def decoder_from_spec(spec: dict[str, Any], **decoder_kwargs: Any) -> Decoder:
 def sinter_decoders_from_specs(
     specs: list[dict[str, Any]], **decoder_kwargs: Any
 ) -> dict[str, Decoder]:
-    return {
-        spec["name"]: decoder_from_spec(spec, **decoder_kwargs)
-        for spec in specs
-    }
+    return {spec["name"]: decoder_from_spec(spec, **decoder_kwargs) for spec in specs}
 
 
 def sinter_decoders(**decoder_kwargs: dict) -> dict[str, Decoder]:
@@ -983,6 +1019,7 @@ def sinter_decoders(**decoder_kwargs: dict) -> dict[str, Decoder]:
             specific.get("gamma_dist_interval", (-0.24, 0.66))
         ),
         "explicit_gammas": specific.get("explicit_gammas", None),
+        "c_damp": c_damp,
         "explicit_c_damp_messages": specific.get("explicit_c_damp_messages", None),
         "c_damp_dist_interval": specific.get("c_damp_dist_interval", None),
         "relay_posteriors": bool(specific.get("relay_posteriors", True)),
@@ -1004,12 +1041,16 @@ def sinter_decoders(**decoder_kwargs: dict) -> dict[str, Decoder]:
         "alpha": alpha,
         "c_damp": specific.get("c_damp", None),
         "explicit_c_damp_messages": explicit_c_damp_messages,
-        "random_decimation_candidates": int(specific.get("random_decimation_candidates", 1)),
+        "random_decimation_candidates": int(
+            specific.get("random_decimation_candidates", 1)
+        ),
         "random_seed": int(specific.get("random_seed", 0)),
     }
 
     return {
-        "relay-bp": SinterDecoder_RelayBP(decoder_label="relay-bp", **relay_kwargs, **common),
+        "relay-bp": SinterDecoder_RelayBP(
+            decoder_label="relay-bp", **relay_kwargs, **common
+        ),
         "mem-bp": SinterDecoder_MemBP(
             decoder_label="mem-bp",
             max_iter=max_iter,
@@ -1029,7 +1070,9 @@ def sinter_decoders(**decoder_kwargs: dict) -> dict[str, Decoder]:
             decoder_label="damped_BP",
             max_iter=max_iter,
             alpha=alpha,
-            c_damp=0.5 if c_damp is None and explicit_c_damp_messages is None else c_damp,
+            c_damp=(
+                0.5 if c_damp is None and explicit_c_damp_messages is None else c_damp
+            ),
             explicit_c_damp_messages=explicit_c_damp_messages,
             **common,
         ),
@@ -1060,7 +1103,9 @@ def sinter_decoders(**decoder_kwargs: dict) -> dict[str, Decoder]:
             r_high=int(specific.get("r_high", specific.get("R_high", 0))),
             t_high=int(specific.get("t_high", specific.get("T_high", 5))),
             c_damp=specific.get("c_damp", None),
-            random_decimation_candidates=int(specific.get("random_decimation_candidates", 1)),
+            random_decimation_candidates=int(
+                specific.get("random_decimation_candidates", 1)
+            ),
             **common,
         ),
         "BPGD-relay-bp": SinterDecoder_BPGD(

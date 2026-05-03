@@ -32,7 +32,6 @@ from __future__ import annotations
 import argparse
 import collections
 import json
-import math
 import multiprocessing
 import os
 import time
@@ -190,32 +189,6 @@ class RelayBPIterationSampler(Sampler):
 
     def compiled_sampler_for_task(self, task: sinter.Task) -> CompiledSampler:
         return CompiledRelayBPIterationSampler(decoder=self.decoder, task=task)
-
-
-class SinterDecoder_RelayBPFixedDamping(SinterDecoder_RelayBP):
-    """Relay-BP decoder using a scalar edge-message damping value on every leg."""
-
-    def __init__(self, *, c_damp: float, **kwargs: Any):
-        if kwargs.get("explicit_c_damp_messages") is not None:
-            raise ValueError("Fixed damping cannot be combined with explicit damping.")
-        if kwargs.get("c_damp_dist_interval") is not None:
-            raise ValueError("Fixed damping cannot be combined with damping interval.")
-        if not math.isfinite(c_damp) or not 0.0 <= c_damp <= 1.0:
-            raise ValueError(f"Expected damping coefficient in [0, 1], got {c_damp}.")
-        self.fixed_c_damp = float(c_damp)
-        super().__init__(**kwargs)
-
-    def build_observable_decoder(self, check_matrices: CheckMatrices):
-        old_explicit_c_damp_messages = self.explicit_c_damp_messages
-        self.explicit_c_damp_messages = np.full(
-            (int(self.num_sets) + 1, int(check_matrices.check_matrix.nnz)),
-            self.fixed_c_damp,
-            dtype=np.float64,
-        )
-        try:
-            return super().build_observable_decoder(check_matrices)
-        finally:
-            self.explicit_c_damp_messages = old_explicit_c_damp_messages
 
 
 class CompiledRelayBPIterationSampler(CompiledSampler):
@@ -381,7 +354,7 @@ def build_custom_decoders() -> dict[str, Sampler]:
             )
         ),
         "relay-bp5-r601-discrete-memory-damp0p9": RelayBPIterationSampler(
-            decoder=SinterDecoder_RelayBPFixedDamping(
+            decoder=SinterDecoder_RelayBP(
                 **common,
                 gamma_bernoulli=RELAY_BERNOULLI_GAMMA,
                 c_damp=RELAY_FIXED_DAMPING,
@@ -399,7 +372,7 @@ def build_custom_decoders() -> dict[str, Sampler]:
             )
         ),
         "relay-bp5-r601-damp0p9": RelayBPIterationSampler(
-            decoder=SinterDecoder_RelayBPFixedDamping(
+            decoder=SinterDecoder_RelayBP(
                 **common,
                 c_damp=RELAY_FIXED_DAMPING,
                 seed=RELAY_BASE_SEED + 5,

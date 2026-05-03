@@ -22,16 +22,19 @@ from relay_bp.stim import (
     sinter_decoders_from_specs,
 )
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_sinter_decoders_from_native_surface_and_bivariate_specs():
     surface_specs = json.loads(
-        (REPO_ROOT / "configs" / "decoder_specs_surface.json").read_text(encoding="utf-8")
+        (REPO_ROOT / "configs" / "decoder_specs_surface.json").read_text(
+            encoding="utf-8"
+        )
     )
     bivariate_specs = json.loads(
-        (REPO_ROOT / "configs" / "decoder_specs_bivariate.json").read_text(encoding="utf-8")
+        (REPO_ROOT / "configs" / "decoder_specs_bivariate.json").read_text(
+            encoding="utf-8"
+        )
     )
 
     surface_decoders = sinter_decoders_from_specs(surface_specs)
@@ -137,7 +140,10 @@ def test_decoder_from_spec_supports_relayed_bpgd():
                         "pre_iter": 80,
                         "num_sets": 30,
                         "set_max_iter": 60,
-                        "gamma_dist_interval": [-0.22628432386414646, 0.6216020925981884],
+                        "gamma_dist_interval": [
+                            -0.22628432386414646,
+                            0.6216020925981884,
+                        ],
                         "relay_posteriors": False,
                         "stop_nconv": 5,
                         "decimation_pre_iter": 30,
@@ -212,6 +218,31 @@ def test_decoder_from_spec_supports_relay_interval_damping():
     )
 
     assert decoder.c_damp_dist_interval == (0.5, 1.0)
+    assert decoder.seed == 9
+
+
+def test_decoder_from_spec_supports_relay_scalar_damping():
+    decoder = decoder_from_spec(
+        {
+            "name": "relay_damp_scalar",
+            "stages": [
+                {
+                    "kind": "relay-bp",
+                    "params": {
+                        "gamma0": 0.15,
+                        "pre_iter": 80,
+                        "num_sets": 30,
+                        "set_max_iter": 60,
+                        "c_damp": 0.9,
+                        "seed": 9,
+                    },
+                }
+            ],
+        }
+    )
+
+    assert decoder.c_damp == 0.9
+    assert decoder.c_damp_dist_interval is None
     assert decoder.seed == 9
 
 

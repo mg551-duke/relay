@@ -26,7 +26,7 @@ macro_rules! create_bp_interface {
         #[pymethods]
         impl $name {
             #[new]
-            #[pyo3(signature = (check_matrix, error_priors, alpha=None, alpha_iteration_scaling_factor=1.0, gamma0=0.1, data_scale_value=None, max_data_value=None, explicit_edge_message_weights=None, pre_iter=80, num_sets=300,
+            #[pyo3(signature = (check_matrix, error_priors, alpha=None, alpha_iteration_scaling_factor=1.0, gamma0=0.1, c_damp=None, data_scale_value=None, max_data_value=None, explicit_edge_message_weights=None, pre_iter=80, num_sets=300,
                 set_max_iter=60, gamma_dist_interval=(-0.24, 0.66), gamma_bernoulli=None, explicit_gammas=None, explicit_c_damp_messages=None, c_damp_dist_interval=None, relay_posteriors=true, stop_nconv=1,
                 stopping_criterion="nconv".to_string(), logging=false, seed=0))]
             #[allow(clippy::missing_transmute_annotations, clippy::too_many_arguments)]
@@ -37,6 +37,7 @@ macro_rules! create_bp_interface {
                 alpha: Option<f64>,
                 alpha_iteration_scaling_factor: f64,
                 gamma0: Option<f64>,
+                c_damp: Option<f64>,
                 data_scale_value: Option<f64>,
                 max_data_value: Option<f64>,
                 explicit_edge_message_weights: Option<&Bound<'_, PyArray1<f64>>>,
@@ -55,13 +56,18 @@ macro_rules! create_bp_interface {
                 seed: u64,
             ) -> PyResult<(Self, DynDecoder)> {
                 let min_sum_decoder = Self {};
+                validate_damping_args(
+                    c_damp,
+                    explicit_c_damp_messages.is_some(),
+                    c_damp_dist_interval,
+                )?;
 
                 let min_sum_config = MinSumDecoderConfig {
                     error_priors: unsafe { error_priors.as_array() }.to_owned(),
                     max_iter: pre_iter, // pre_iter is equal to max_iter for a single bp run.
                     alpha,
                     alpha_iteration_scaling_factor,
-                    c_damp: None,
+                    c_damp,
                     explicit_c_damp_messages: None,
                     explicit_edge_message_weights: explicit_edge_message_weights
                         .map(|weights| unsafe { weights.as_array() }.to_owned()),
@@ -178,4 +184,24 @@ fn gamma_sampler_from_args(
         .validate()
         .map_err(pyo3::exceptions::PyValueError::new_err)?;
     Ok(sampler)
+}
+
+fn validate_damping_args(
+    c_damp: Option<f64>,
+    has_explicit_c_damp_messages: bool,
+    c_damp_dist_interval: Option<(f64, f64)>,
+) -> PyResult<()> {
+    if let Some(value) = c_damp {
+        if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "c_damp must be finite and in [0, 1].",
+            ));
+        }
+        if has_explicit_c_damp_messages || c_damp_dist_interval.is_some() {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "c_damp cannot be combined with explicit_c_damp_messages or c_damp_dist_interval.",
+            ));
+        }
+    }
+    Ok(())
 }
