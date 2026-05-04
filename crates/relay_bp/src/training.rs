@@ -171,8 +171,15 @@ pub struct BernoulliTrainingProgress {
     pub final_raw_std: [f64; 3],
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StaticMemoryOptimizer {
+    Cem,
+    Nes,
+}
+
 #[derive(Clone, Debug)]
 pub struct StaticDiscreteMemoryTrainingConfig {
+    pub optimizer: StaticMemoryOptimizer,
     pub negative: f64,
     pub positive: f64,
     pub p_positive: f64,
@@ -185,11 +192,15 @@ pub struct StaticDiscreteMemoryTrainingConfig {
     pub train_max_logical_failures: Option<usize>,
     pub validation_max_logical_failures: Option<usize>,
     pub seed: u64,
+    pub nes_learning_rate: f64,
+    pub initial_probability_vector: Option<Array1<f64>>,
+    pub initial_mask: Option<Array1<Bit>>,
 }
 
 impl Default for StaticDiscreteMemoryTrainingConfig {
     fn default() -> Self {
         Self {
+            optimizer: StaticMemoryOptimizer::Cem,
             negative: -0.0687506131581227,
             positive: 0.3557972204473916,
             p_positive: 0.5451025293701163,
@@ -202,12 +213,16 @@ impl Default for StaticDiscreteMemoryTrainingConfig {
             train_max_logical_failures: None,
             validation_max_logical_failures: None,
             seed: 0,
+            nes_learning_rate: 0.7,
+            initial_probability_vector: None,
+            initial_mask: None,
         }
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct StaticContinuousMemoryTrainingConfig {
+    pub optimizer: StaticMemoryOptimizer,
     pub negative: f64,
     pub positive: f64,
     pub p_positive: f64,
@@ -225,11 +240,18 @@ pub struct StaticContinuousMemoryTrainingConfig {
     pub validation_max_logical_failures: Option<usize>,
     pub seed: u64,
     pub initial_gammas: Option<Array1<f64>>,
+    pub nes_learning_rate: f64,
+    pub nes_sigma_learning_rate: f64,
+    pub nes_impact_decay: f64,
+    pub sigma_min: f64,
+    pub sigma_max: f64,
+    pub initial_impact_gammas: Option<Array1<f64>>,
 }
 
 impl Default for StaticContinuousMemoryTrainingConfig {
     fn default() -> Self {
         Self {
+            optimizer: StaticMemoryOptimizer::Cem,
             negative: -0.0687506131581227,
             positive: 0.3557972204473916,
             p_positive: 0.5451025293701163,
@@ -247,6 +269,12 @@ impl Default for StaticContinuousMemoryTrainingConfig {
             validation_max_logical_failures: None,
             seed: 0,
             initial_gammas: None,
+            nes_learning_rate: 0.2,
+            nes_sigma_learning_rate: 0.05,
+            nes_impact_decay: 0.9,
+            sigma_min: 1.0e-4,
+            sigma_max: 0.25,
+            initial_impact_gammas: None,
         }
     }
 }
@@ -301,6 +329,7 @@ pub struct StaticContinuousGenerationRecord {
     pub generation: usize,
     pub mean_gammas: Array1<f64>,
     pub std_gammas: Array1<f64>,
+    pub impact_gammas: Array1<f64>,
     pub best_candidate: StaticContinuousCandidateResult,
 }
 
@@ -311,6 +340,7 @@ pub struct StaticContinuousTrainingResult {
     pub generation_records: Vec<StaticContinuousGenerationRecord>,
     pub final_mean_gammas: Array1<f64>,
     pub final_std_gammas: Array1<f64>,
+    pub final_impact_gammas: Array1<f64>,
 }
 
 #[derive(Clone, Debug)]
@@ -318,6 +348,7 @@ pub struct StaticContinuousTrainingResumeState {
     pub completed_generations: usize,
     pub mean_gammas: Array1<f64>,
     pub std_gammas: Array1<f64>,
+    pub impact_gammas: Array1<f64>,
     pub best_candidate: Option<StaticContinuousCandidateResult>,
     pub generation_records: Vec<StaticContinuousGenerationRecord>,
 }
@@ -330,6 +361,7 @@ pub struct StaticContinuousTrainingProgress {
     pub generation_records: Vec<StaticContinuousGenerationRecord>,
     pub final_mean_gammas: Array1<f64>,
     pub final_std_gammas: Array1<f64>,
+    pub final_impact_gammas: Array1<f64>,
 }
 
 pub fn train_relayed_bpgd_bernoulli_memory(
@@ -487,6 +519,15 @@ pub fn train_relayed_bpgd_static_discrete_memory_with_progress(
         &mut dyn FnMut(&StaticDiscreteTrainingProgress) -> Result<(), String>,
     >,
 ) -> Result<StaticDiscreteTrainingResult, String> {
+    if training_config.optimizer == StaticMemoryOptimizer::Nes {
+        return train_relayed_bpgd_static_discrete_memory_nes_with_progress(
+            problem,
+            decoder_config,
+            training_config,
+            resume_state,
+            progress_callback,
+        );
+    }
     validate_problem(&problem)?;
     validate_static_discrete_training_config(&training_config)?;
     let num_variables = problem.check_matrix.cols();
@@ -514,13 +555,7 @@ pub fn train_relayed_bpgd_static_discrete_memory_with_progress(
             }
             state.probability_vector.clone()
         }
-        None => Array1::from_elem(
-            num_variables,
-            training_config.p_positive.clamp(
-                training_config.probability_floor,
-                1.0 - training_config.probability_floor,
-            ),
-        ),
+        None => initial_static_discrete_probability_vector(&training_config, num_variables)?,
     };
     clamp_probability_vector(&mut probability_vector, training_config.probability_floor);
     let mut generation_records = resume_state
@@ -528,6 +563,14 @@ pub fn train_relayed_bpgd_static_discrete_memory_with_progress(
         .map(|state| state.generation_records.clone())
         .unwrap_or_default();
     let mut best_overall = resume_state.and_then(|state| state.best_candidate);
+    if best_overall.is_none() {
+        best_overall = evaluate_initial_static_discrete_mask(
+            &problem,
+            &decoder_config,
+            &training_config,
+            training_config.seed.wrapping_add(4_000_003),
+        )?;
+    }
 
     for generation in start_generation..training_config.generations {
         let masks = sample_static_discrete_masks(&probability_vector, generation, &training_config);
@@ -625,6 +668,15 @@ pub fn train_relayed_bpgd_static_continuous_memory_with_progress(
         &mut dyn FnMut(&StaticContinuousTrainingProgress) -> Result<(), String>,
     >,
 ) -> Result<StaticContinuousTrainingResult, String> {
+    if training_config.optimizer == StaticMemoryOptimizer::Nes {
+        return train_relayed_bpgd_static_continuous_memory_nes_with_progress(
+            problem,
+            decoder_config,
+            training_config,
+            resume_state,
+            progress_callback,
+        );
+    }
     validate_problem(&problem)?;
     validate_static_continuous_training_config(&training_config)?;
     let num_variables = problem.check_matrix.cols();
@@ -654,8 +706,20 @@ pub fn train_relayed_bpgd_static_continuous_memory_with_progress(
         }
         None => Array1::from_elem(num_variables, training_config.initial_std),
     };
+    let impact_gammas = match resume_state.as_ref() {
+        Some(state) => {
+            validate_static_vector_len(
+                "resume impact_gammas",
+                state.impact_gammas.len(),
+                num_variables,
+            )?;
+            state.impact_gammas.clone()
+        }
+        None => Array1::zeros(num_variables),
+    };
     validate_finite_vector("mean_gammas", mean_gammas.view())?;
     validate_finite_vector("std_gammas", std_gammas.view())?;
+    validate_finite_vector("impact_gammas", impact_gammas.view())?;
     clamp_gamma_vector(
         &mut mean_gammas,
         training_config.memory_min,
@@ -669,6 +733,16 @@ pub fn train_relayed_bpgd_static_continuous_memory_with_progress(
         .map(|state| state.generation_records.clone())
         .unwrap_or_default();
     let mut best_overall = resume_state.and_then(|state| state.best_candidate);
+    if best_overall.is_none() {
+        best_overall = Some(evaluate_static_continuous_candidate(
+            &problem,
+            &decoder_config,
+            &training_config,
+            mean_gammas.view(),
+            training_config.seed.wrapping_add(4_000_003),
+            false,
+        ));
+    }
 
     for generation in start_generation..training_config.generations {
         let candidates = sample_static_continuous_candidates(
@@ -720,6 +794,7 @@ pub fn train_relayed_bpgd_static_continuous_memory_with_progress(
             generation,
             mean_gammas: mean_gammas.clone(),
             std_gammas: std_gammas.clone(),
+            impact_gammas: impact_gammas.clone(),
             best_candidate: generation_best,
         });
         if let (Some(callback), Some(best_candidate), Some(generation_record)) = (
@@ -734,6 +809,7 @@ pub fn train_relayed_bpgd_static_continuous_memory_with_progress(
                 generation_records: generation_records.clone(),
                 final_mean_gammas: mean_gammas.clone(),
                 final_std_gammas: std_gammas.clone(),
+                final_impact_gammas: impact_gammas.clone(),
             })?;
         }
     }
@@ -756,6 +832,297 @@ pub fn train_relayed_bpgd_static_continuous_memory_with_progress(
         generation_records,
         final_mean_gammas: mean_gammas,
         final_std_gammas: std_gammas,
+        final_impact_gammas: impact_gammas,
+    })
+}
+
+fn train_relayed_bpgd_static_discrete_memory_nes_with_progress(
+    problem: BernoulliTrainingProblem,
+    decoder_config: RelayedBpgdTrainingDecoderConfig,
+    training_config: StaticDiscreteMemoryTrainingConfig,
+    resume_state: Option<StaticDiscreteTrainingResumeState>,
+    mut progress_callback: Option<
+        &mut dyn FnMut(&StaticDiscreteTrainingProgress) -> Result<(), String>,
+    >,
+) -> Result<StaticDiscreteTrainingResult, String> {
+    validate_problem(&problem)?;
+    validate_static_discrete_training_config(&training_config)?;
+    let num_variables = problem.check_matrix.cols();
+    let start_generation = resume_state
+        .as_ref()
+        .map(|state| state.completed_generations)
+        .unwrap_or(0);
+    if start_generation > training_config.generations {
+        return Err("resume completed_generations exceeds requested generations.".to_string());
+    }
+
+    let mut probability_vector = match resume_state.as_ref() {
+        Some(state) => {
+            validate_static_vector_len(
+                "resume probability_vector",
+                state.probability_vector.len(),
+                num_variables,
+            )?;
+            state.probability_vector.clone()
+        }
+        None => initial_static_discrete_probability_vector(&training_config, num_variables)?,
+    };
+    clamp_probability_vector(&mut probability_vector, training_config.probability_floor);
+    let mut logits = probability_vector.mapv(logit_from_probability);
+    let mut generation_records = resume_state
+        .as_ref()
+        .map(|state| state.generation_records.clone())
+        .unwrap_or_default();
+    let mut best_overall = resume_state.and_then(|state| state.best_candidate);
+    if best_overall.is_none() {
+        best_overall = evaluate_initial_static_discrete_mask(
+            &problem,
+            &decoder_config,
+            &training_config,
+            training_config.seed.wrapping_add(4_000_003),
+        )?;
+    }
+
+    for generation in start_generation..training_config.generations {
+        let masks = sample_static_discrete_masks(&probability_vector, generation, &training_config);
+        let results = evaluate_static_discrete_masks(
+            &problem,
+            &decoder_config,
+            &training_config,
+            &masks,
+            generation,
+            false,
+        );
+        let mut ranked_results = results.clone();
+        ranked_results.sort_by(compare_static_discrete_candidate_results);
+        let generation_best = ranked_results
+            .first()
+            .cloned()
+            .ok_or_else(|| "No static discrete NES candidates were evaluated.".to_string())?;
+        if best_overall
+            .as_ref()
+            .map(|best| is_better_static_discrete_candidate(&generation_best, best))
+            .unwrap_or(true)
+        {
+            best_overall = Some(generation_best.clone());
+        }
+
+        let utilities = rank_utilities_for_discrete_results(&results);
+        update_static_discrete_logits_from_utilities(
+            &mut logits,
+            &probability_vector,
+            &results,
+            &utilities,
+            training_config.nes_learning_rate,
+        );
+        probability_vector = logits.mapv(probability_from_logit);
+        clamp_probability_vector(&mut probability_vector, training_config.probability_floor);
+        logits = probability_vector.mapv(logit_from_probability);
+
+        generation_records.push(StaticDiscreteGenerationRecord {
+            generation,
+            probability_vector: probability_vector.clone(),
+            best_candidate: generation_best,
+        });
+        if let (Some(callback), Some(best_candidate), Some(generation_record)) = (
+            progress_callback.as_deref_mut(),
+            best_overall.as_ref(),
+            generation_records.last(),
+        ) {
+            callback(&StaticDiscreteTrainingProgress {
+                completed_generations: generation + 1,
+                generation_record: generation_record.clone(),
+                best_candidate: best_candidate.clone(),
+                generation_records: generation_records.clone(),
+                final_probability_vector: probability_vector.clone(),
+            })?;
+        }
+    }
+
+    let best = best_overall.ok_or_else(|| "Training produced no candidate.".to_string())?;
+    let validation_metrics = evaluate_static_gammas(
+        &problem,
+        &decoder_config,
+        best.gammas.view(),
+        training_config.distribution_repeats,
+        training_config.train_max_logical_failures,
+        training_config.validation_max_logical_failures,
+        training_config.seed.wrapping_add(9_000_000),
+        true,
+    );
+    Ok(StaticDiscreteTrainingResult {
+        best_candidate: best,
+        validation_metrics,
+        generation_records,
+        final_probability_vector: probability_vector,
+    })
+}
+
+fn train_relayed_bpgd_static_continuous_memory_nes_with_progress(
+    problem: BernoulliTrainingProblem,
+    decoder_config: RelayedBpgdTrainingDecoderConfig,
+    training_config: StaticContinuousMemoryTrainingConfig,
+    resume_state: Option<StaticContinuousTrainingResumeState>,
+    mut progress_callback: Option<
+        &mut dyn FnMut(&StaticContinuousTrainingProgress) -> Result<(), String>,
+    >,
+) -> Result<StaticContinuousTrainingResult, String> {
+    validate_problem(&problem)?;
+    validate_static_continuous_training_config(&training_config)?;
+    let num_variables = problem.check_matrix.cols();
+    let start_generation = resume_state
+        .as_ref()
+        .map(|state| state.completed_generations)
+        .unwrap_or(0);
+    if start_generation > training_config.generations {
+        return Err("resume completed_generations exceeds requested generations.".to_string());
+    }
+
+    let mut mean_gammas = match resume_state.as_ref() {
+        Some(state) => {
+            validate_static_vector_len(
+                "resume mean_gammas",
+                state.mean_gammas.len(),
+                num_variables,
+            )?;
+            state.mean_gammas.clone()
+        }
+        None => initialize_static_continuous_mean(&problem, &decoder_config, &training_config)?,
+    };
+    let mut std_gammas = match resume_state.as_ref() {
+        Some(state) => {
+            validate_static_vector_len("resume std_gammas", state.std_gammas.len(), num_variables)?;
+            state.std_gammas.clone()
+        }
+        None => Array1::from_elem(
+            num_variables,
+            training_config
+                .initial_std
+                .clamp(training_config.sigma_min, training_config.sigma_max),
+        ),
+    };
+    let mut impact_gammas = match resume_state.as_ref() {
+        Some(state) => {
+            validate_static_vector_len(
+                "resume impact_gammas",
+                state.impact_gammas.len(),
+                num_variables,
+            )?;
+            state.impact_gammas.clone()
+        }
+        None => initialize_static_continuous_impact(&training_config, num_variables)?,
+    };
+    validate_finite_vector("mean_gammas", mean_gammas.view())?;
+    validate_finite_vector("std_gammas", std_gammas.view())?;
+    validate_finite_vector("impact_gammas", impact_gammas.view())?;
+    clamp_gamma_vector(
+        &mut mean_gammas,
+        training_config.memory_min,
+        training_config.memory_max,
+    );
+    clamp_gamma_vector(
+        &mut std_gammas,
+        training_config.sigma_min,
+        training_config.sigma_max,
+    );
+
+    let mut generation_records = resume_state
+        .as_ref()
+        .map(|state| state.generation_records.clone())
+        .unwrap_or_default();
+    let mut best_overall = resume_state.and_then(|state| state.best_candidate);
+    if best_overall.is_none() {
+        best_overall = Some(evaluate_static_continuous_candidate(
+            &problem,
+            &decoder_config,
+            &training_config,
+            mean_gammas.view(),
+            training_config.seed.wrapping_add(4_000_003),
+            false,
+        ));
+    }
+
+    for generation in start_generation..training_config.generations {
+        let (candidates, pairs) = sample_static_continuous_nes_candidates(
+            &mean_gammas,
+            &std_gammas,
+            generation,
+            &training_config,
+        );
+        let results = evaluate_static_continuous_gammas(
+            &problem,
+            &decoder_config,
+            &training_config,
+            &candidates,
+            generation,
+            false,
+        );
+        let mut ranked_results = results.clone();
+        ranked_results.sort_by(compare_static_continuous_candidate_results);
+        let generation_best = ranked_results
+            .first()
+            .cloned()
+            .ok_or_else(|| "No static continuous NES candidates were evaluated.".to_string())?;
+        if best_overall
+            .as_ref()
+            .map(|best| is_better_static_continuous_candidate(&generation_best, best))
+            .unwrap_or(true)
+        {
+            best_overall = Some(generation_best.clone());
+        }
+
+        let utilities = rank_utilities_for_continuous_results(&results);
+        let delta = continuous_nes_delta(num_variables, &pairs, &utilities);
+        apply_continuous_nes_update(
+            &mut mean_gammas,
+            &mut std_gammas,
+            &mut impact_gammas,
+            &delta,
+            &training_config,
+        );
+
+        generation_records.push(StaticContinuousGenerationRecord {
+            generation,
+            mean_gammas: mean_gammas.clone(),
+            std_gammas: std_gammas.clone(),
+            impact_gammas: impact_gammas.clone(),
+            best_candidate: generation_best,
+        });
+        if let (Some(callback), Some(best_candidate), Some(generation_record)) = (
+            progress_callback.as_deref_mut(),
+            best_overall.as_ref(),
+            generation_records.last(),
+        ) {
+            callback(&StaticContinuousTrainingProgress {
+                completed_generations: generation + 1,
+                generation_record: generation_record.clone(),
+                best_candidate: best_candidate.clone(),
+                generation_records: generation_records.clone(),
+                final_mean_gammas: mean_gammas.clone(),
+                final_std_gammas: std_gammas.clone(),
+                final_impact_gammas: impact_gammas.clone(),
+            })?;
+        }
+    }
+
+    let best = best_overall.ok_or_else(|| "Training produced no candidate.".to_string())?;
+    let validation_metrics = evaluate_static_gammas(
+        &problem,
+        &decoder_config,
+        best.gammas.view(),
+        training_config.distribution_repeats,
+        training_config.train_max_logical_failures,
+        training_config.validation_max_logical_failures,
+        training_config.seed.wrapping_add(9_000_000),
+        true,
+    );
+    Ok(StaticContinuousTrainingResult {
+        best_candidate: best,
+        validation_metrics,
+        generation_records,
+        final_mean_gammas: mean_gammas,
+        final_std_gammas: std_gammas,
+        final_impact_gammas: impact_gammas,
     })
 }
 
@@ -773,6 +1140,23 @@ fn validate_static_discrete_training_config(
     }
     if !(0.0..=1.0).contains(&config.smoothing) || !config.smoothing.is_finite() {
         return Err("smoothing must be finite and in [0, 1].".to_string());
+    }
+    if config.nes_learning_rate <= 0.0 || !config.nes_learning_rate.is_finite() {
+        return Err("nes_learning_rate must be positive and finite.".to_string());
+    }
+    if let Some(probability_vector) = config.initial_probability_vector.as_ref() {
+        validate_finite_vector("initial_probability_vector", probability_vector.view())?;
+        if probability_vector
+            .iter()
+            .any(|value| !(0.0..=1.0).contains(value))
+        {
+            return Err("initial_probability_vector values must lie in [0, 1].".to_string());
+        }
+    }
+    if let Some(mask) = config.initial_mask.as_ref() {
+        if mask.iter().any(|bit| *bit > 1) {
+            return Err("initial_mask values must be 0 or 1.".to_string());
+        }
     }
     validate_failure_limits(
         config.train_max_logical_failures,
@@ -809,8 +1193,29 @@ fn validate_static_continuous_training_config(
     if !(0.0..=1.0).contains(&config.smoothing) || !config.smoothing.is_finite() {
         return Err("smoothing must be finite and in [0, 1].".to_string());
     }
+    if config.nes_learning_rate <= 0.0 || !config.nes_learning_rate.is_finite() {
+        return Err("nes_learning_rate must be positive and finite.".to_string());
+    }
+    if config.nes_sigma_learning_rate < 0.0 || !config.nes_sigma_learning_rate.is_finite() {
+        return Err("nes_sigma_learning_rate must be non-negative and finite.".to_string());
+    }
+    if !(0.0..1.0).contains(&config.nes_impact_decay) || !config.nes_impact_decay.is_finite() {
+        return Err("nes_impact_decay must be finite and in [0, 1).".to_string());
+    }
+    if config.sigma_min <= 0.0
+        || !config.sigma_min.is_finite()
+        || config.sigma_max < config.sigma_min
+        || !config.sigma_max.is_finite()
+    {
+        return Err(
+            "sigma bounds must be finite and satisfy 0 < sigma_min <= sigma_max.".to_string(),
+        );
+    }
     if let Some(initial_gammas) = config.initial_gammas.as_ref() {
         validate_finite_vector("initial_gammas", initial_gammas.view())?;
+    }
+    if let Some(initial_impact_gammas) = config.initial_impact_gammas.as_ref() {
+        validate_finite_vector("initial_impact_gammas", initial_impact_gammas.view())?;
     }
     validate_failure_limits(
         config.train_max_logical_failures,
@@ -880,6 +1285,62 @@ fn validate_finite_vector(label: &str, values: ArrayView1<f64>) -> Result<(), St
     Ok(())
 }
 
+fn initial_static_discrete_probability_vector(
+    config: &StaticDiscreteMemoryTrainingConfig,
+    num_variables: usize,
+) -> Result<Array1<f64>, String> {
+    if let Some(probability_vector) = config.initial_probability_vector.as_ref() {
+        validate_static_vector_len(
+            "initial_probability_vector",
+            probability_vector.len(),
+            num_variables,
+        )?;
+        let mut probabilities = probability_vector.clone();
+        clamp_probability_vector(&mut probabilities, config.probability_floor);
+        return Ok(probabilities);
+    }
+    if let Some(mask) = config.initial_mask.as_ref() {
+        validate_static_vector_len("initial_mask", mask.len(), num_variables)?;
+        let low = config.probability_floor.max(0.1).min(0.5);
+        let high = (1.0 - config.probability_floor).min(0.9).max(0.5);
+        return Ok(mask.mapv(|bit| if bit != 0 { high } else { low }));
+    }
+    Ok(Array1::from_elem(
+        num_variables,
+        config
+            .p_positive
+            .clamp(config.probability_floor, 1.0 - config.probability_floor),
+    ))
+}
+
+fn evaluate_initial_static_discrete_mask(
+    problem: &BernoulliTrainingProblem,
+    decoder_config: &RelayedBpgdTrainingDecoderConfig,
+    config: &StaticDiscreteMemoryTrainingConfig,
+    seed: u64,
+) -> Result<Option<StaticDiscreteCandidateResult>, String> {
+    let Some(mask) = config.initial_mask.as_ref() else {
+        return Ok(None);
+    };
+    validate_static_vector_len("initial_mask", mask.len(), problem.check_matrix.cols())?;
+    let gammas = static_discrete_mask_to_gammas(mask.view(), config.negative, config.positive);
+    let metrics = evaluate_static_gammas(
+        problem,
+        decoder_config,
+        gammas.view(),
+        config.distribution_repeats,
+        config.train_max_logical_failures,
+        config.validation_max_logical_failures,
+        seed,
+        false,
+    );
+    Ok(Some(StaticDiscreteCandidateResult {
+        mask: mask.clone(),
+        gammas,
+        metrics,
+    }))
+}
+
 fn sample_static_discrete_masks(
     probability_vector: &Array1<f64>,
     generation: usize,
@@ -887,7 +1348,15 @@ fn sample_static_discrete_masks(
 ) -> Vec<Array1<Bit>> {
     let mut candidates = Vec::with_capacity(config.candidate_count);
     candidates.push(probability_vector.mapv(|probability| if probability >= 0.5 { 1 } else { 0 }));
-    for candidate_idx in 1..config.candidate_count {
+    if generation == 0 && candidates.len() < config.candidate_count {
+        if let Some(initial_mask) = config.initial_mask.as_ref() {
+            if initial_mask.len() == probability_vector.len() {
+                candidates.push(initial_mask.clone());
+            }
+        }
+    }
+    let mut candidate_idx = 1usize;
+    while candidates.len() < config.candidate_count {
         let mut rng = rand::rngs::StdRng::seed_from_u64(
             config
                 .seed
@@ -904,6 +1373,7 @@ fn sample_static_discrete_masks(
             },
         );
         candidates.push(mask);
+        candidate_idx += 1;
     }
     candidates
 }
@@ -1083,6 +1553,28 @@ fn evaluate_static_continuous_gammas(
         .collect()
 }
 
+fn evaluate_static_continuous_candidate(
+    problem: &BernoulliTrainingProblem,
+    decoder_config: &RelayedBpgdTrainingDecoderConfig,
+    training_config: &StaticContinuousMemoryTrainingConfig,
+    gammas: ArrayView1<f64>,
+    seed: u64,
+    validation: bool,
+) -> StaticContinuousCandidateResult {
+    let gammas = gammas.to_owned();
+    let metrics = evaluate_static_gammas(
+        problem,
+        decoder_config,
+        gammas.view(),
+        training_config.distribution_repeats,
+        training_config.train_max_logical_failures,
+        training_config.validation_max_logical_failures,
+        seed,
+        validation,
+    );
+    StaticContinuousCandidateResult { gammas, metrics }
+}
+
 fn fit_static_continuous_elites(
     elites: &[StaticContinuousCandidateResult],
     num_variables: usize,
@@ -1112,6 +1604,206 @@ fn clamp_gamma_vector(gammas: &mut Array1<f64>, low: f64, high: f64) {
     for gamma in gammas {
         *gamma = gamma.clamp(low, high);
     }
+}
+
+#[derive(Clone, Debug)]
+struct StaticContinuousNesPair {
+    plus_index: usize,
+    minus_index: usize,
+    epsilon: Array1<f64>,
+}
+
+fn rank_utilities_for_discrete_results(results: &[StaticDiscreteCandidateResult]) -> Vec<f64> {
+    let mut indices: Vec<usize> = (0..results.len()).collect();
+    indices.sort_by(|left, right| {
+        compare_static_discrete_candidate_results(&results[*left], &results[*right])
+    });
+    rank_utilities_from_sorted_indices(indices)
+}
+
+fn rank_utilities_for_continuous_results(results: &[StaticContinuousCandidateResult]) -> Vec<f64> {
+    let mut indices: Vec<usize> = (0..results.len()).collect();
+    indices.sort_by(|left, right| {
+        compare_static_continuous_candidate_results(&results[*left], &results[*right])
+    });
+    rank_utilities_from_sorted_indices(indices)
+}
+
+fn rank_utilities_from_sorted_indices(indices: Vec<usize>) -> Vec<f64> {
+    let count = indices.len();
+    if count == 0 {
+        return Vec::new();
+    }
+    if count == 1 {
+        return vec![0.0];
+    }
+    let mut utilities = vec![0.0; count];
+    let denom = (count - 1) as f64;
+    for (rank, index) in indices.into_iter().enumerate() {
+        utilities[index] = (denom - 2.0 * rank as f64) / denom;
+    }
+    let abs_sum: f64 = utilities.iter().map(|value| value.abs()).sum();
+    if abs_sum > 0.0 {
+        for utility in utilities.iter_mut() {
+            *utility /= abs_sum;
+        }
+    }
+    utilities
+}
+
+fn update_static_discrete_logits_from_utilities(
+    logits: &mut Array1<f64>,
+    probability_vector: &Array1<f64>,
+    results: &[StaticDiscreteCandidateResult],
+    utilities: &[f64],
+    learning_rate: f64,
+) {
+    let mut gradient = Array1::<f64>::zeros(logits.len());
+    for (result, utility) in results.iter().zip(utilities.iter()) {
+        for idx in 0..gradient.len() {
+            let bit = if result.mask[idx] != 0 { 1.0 } else { 0.0 };
+            gradient[idx] += utility * (bit - probability_vector[idx]);
+        }
+    }
+    for idx in 0..logits.len() {
+        logits[idx] += learning_rate * gradient[idx];
+    }
+}
+
+fn initialize_static_continuous_impact(
+    config: &StaticContinuousMemoryTrainingConfig,
+    num_variables: usize,
+) -> Result<Array1<f64>, String> {
+    if let Some(initial_impact_gammas) = config.initial_impact_gammas.as_ref() {
+        validate_static_vector_len(
+            "initial_impact_gammas",
+            initial_impact_gammas.len(),
+            num_variables,
+        )?;
+        return Ok(initial_impact_gammas.clone());
+    }
+    Ok(Array1::zeros(num_variables))
+}
+
+fn sample_static_continuous_nes_candidates(
+    mean_gammas: &Array1<f64>,
+    std_gammas: &Array1<f64>,
+    generation: usize,
+    config: &StaticContinuousMemoryTrainingConfig,
+) -> (Vec<Array1<f64>>, Vec<StaticContinuousNesPair>) {
+    let mut candidates = Vec::with_capacity(config.candidate_count);
+    let mut pairs = Vec::new();
+
+    let mut mean_candidate = mean_gammas.clone();
+    clamp_gamma_vector(&mut mean_candidate, config.memory_min, config.memory_max);
+    candidates.push(mean_candidate);
+
+    if generation == 0 && candidates.len() < config.candidate_count {
+        if let Some(initial_gammas) = config.initial_gammas.as_ref() {
+            if initial_gammas.len() == mean_gammas.len()
+                && !vectors_are_nearly_equal(initial_gammas.view(), mean_gammas.view())
+            {
+                let mut candidate = initial_gammas.clone();
+                clamp_gamma_vector(&mut candidate, config.memory_min, config.memory_max);
+                candidates.push(candidate);
+            }
+        }
+    }
+
+    let pair_budget = config.candidate_count.saturating_sub(candidates.len()) / 2;
+    for pair_idx in 0..pair_budget {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(
+            config
+                .seed
+                .wrapping_add(1_000_003 * generation as u64)
+                .wrapping_add(193_939 * pair_idx as u64),
+        );
+        let epsilon =
+            Array1::from_shape_fn(mean_gammas.len(), |_| sample_standard_normal(&mut rng));
+        let mut plus = Array1::zeros(mean_gammas.len());
+        let mut minus = Array1::zeros(mean_gammas.len());
+        for idx in 0..mean_gammas.len() {
+            let sigma = std_gammas[idx].clamp(config.sigma_min, config.sigma_max);
+            plus[idx] = mean_gammas[idx] + sigma * epsilon[idx];
+            minus[idx] = mean_gammas[idx] - sigma * epsilon[idx];
+        }
+        clamp_gamma_vector(&mut plus, config.memory_min, config.memory_max);
+        clamp_gamma_vector(&mut minus, config.memory_min, config.memory_max);
+
+        let plus_index = candidates.len();
+        candidates.push(plus);
+        let minus_index = candidates.len();
+        candidates.push(minus);
+        pairs.push(StaticContinuousNesPair {
+            plus_index,
+            minus_index,
+            epsilon,
+        });
+    }
+
+    (candidates, pairs)
+}
+
+fn continuous_nes_delta(
+    num_variables: usize,
+    pairs: &[StaticContinuousNesPair],
+    utilities: &[f64],
+) -> Array1<f64> {
+    let mut delta = Array1::<f64>::zeros(num_variables);
+    if pairs.is_empty() {
+        return delta;
+    }
+    for pair in pairs {
+        let weight = utilities[pair.plus_index] - utilities[pair.minus_index];
+        for idx in 0..num_variables {
+            delta[idx] += weight * pair.epsilon[idx];
+        }
+    }
+    delta.mapv_inplace(|value| value / pairs.len() as f64);
+    delta
+}
+
+fn apply_continuous_nes_update(
+    mean_gammas: &mut Array1<f64>,
+    std_gammas: &mut Array1<f64>,
+    impact_gammas: &mut Array1<f64>,
+    delta: &Array1<f64>,
+    config: &StaticContinuousMemoryTrainingConfig,
+) {
+    for idx in 0..mean_gammas.len() {
+        let signal = delta[idx];
+        mean_gammas[idx] += config.nes_learning_rate * std_gammas[idx] * signal;
+        impact_gammas[idx] = config.nes_impact_decay * impact_gammas[idx]
+            + (1.0 - config.nes_impact_decay) * signal.abs();
+    }
+    clamp_gamma_vector(mean_gammas, config.memory_min, config.memory_max);
+
+    let mean_impact =
+        impact_gammas.iter().copied().sum::<f64>() / impact_gammas.len().max(1) as f64;
+    let baseline = mean_impact.max(1.0e-12);
+    for idx in 0..std_gammas.len() {
+        let normalized = (impact_gammas[idx] / baseline).clamp(0.0, 10.0);
+        let log_scale = (config.nes_sigma_learning_rate * (normalized - 1.0)).clamp(-0.2, 0.2);
+        std_gammas[idx] =
+            (std_gammas[idx] * log_scale.exp()).clamp(config.sigma_min, config.sigma_max);
+    }
+}
+
+fn vectors_are_nearly_equal(left: ArrayView1<f64>, right: ArrayView1<f64>) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right.iter())
+            .all(|(left_value, right_value)| (left_value - right_value).abs() <= 1.0e-12)
+}
+
+fn logit_from_probability(probability: f64) -> f64 {
+    let probability = probability.clamp(1.0e-12, 1.0 - 1.0e-12);
+    (probability / (1.0 - probability)).ln()
+}
+
+fn probability_from_logit(logit: f64) -> f64 {
+    sigmoid(logit)
 }
 
 fn evaluate_static_gammas(
@@ -1727,5 +2419,103 @@ mod tests {
             ..Default::default()
         };
         assert!(validate_static_continuous_training_config(&config).is_err());
+    }
+
+    #[test]
+    fn static_discrete_nes_logit_update_moves_toward_better_ranked_mask() {
+        let good_metrics = BernoulliEvaluationMetrics {
+            shots: 1,
+            repeats: 1,
+            trials: 1,
+            logical_failures: 0,
+            max_logical_failures: None,
+            stopped_early: false,
+            logical_failure_rate: 0.0,
+            convergence_rate: 1.0,
+            mean_iterations: 1.0,
+        };
+        let bad_metrics = BernoulliEvaluationMetrics {
+            logical_failures: 1,
+            logical_failure_rate: 1.0,
+            ..good_metrics.clone()
+        };
+        let results = vec![
+            StaticDiscreteCandidateResult {
+                mask: Array1::from(vec![1]),
+                gammas: Array1::from(vec![0.3]),
+                metrics: good_metrics,
+            },
+            StaticDiscreteCandidateResult {
+                mask: Array1::from(vec![0]),
+                gammas: Array1::from(vec![-0.1]),
+                metrics: bad_metrics,
+            },
+        ];
+        let probability_vector = Array1::from(vec![0.5]);
+        let mut logits = Array1::from(vec![0.0]);
+        let utilities = rank_utilities_for_discrete_results(&results);
+        update_static_discrete_logits_from_utilities(
+            &mut logits,
+            &probability_vector,
+            &results,
+            &utilities,
+            1.0,
+        );
+        assert!(probability_from_logit(logits[0]) > 0.5);
+    }
+
+    #[test]
+    fn static_continuous_nes_pair_update_moves_mean_toward_better_perturbation() {
+        let mut mean_gammas = Array1::from(vec![0.0]);
+        let mut std_gammas = Array1::from(vec![0.1]);
+        let mut impact_gammas = Array1::zeros(1);
+        let delta = Array1::from(vec![1.0]);
+        let config = StaticContinuousMemoryTrainingConfig {
+            memory_min: -1.0,
+            memory_max: 1.0,
+            nes_learning_rate: 1.0,
+            nes_sigma_learning_rate: 0.0,
+            nes_impact_decay: 0.5,
+            sigma_min: 0.001,
+            sigma_max: 1.0,
+            ..Default::default()
+        };
+        apply_continuous_nes_update(
+            &mut mean_gammas,
+            &mut std_gammas,
+            &mut impact_gammas,
+            &delta,
+            &config,
+        );
+        assert!(mean_gammas[0] > 0.0);
+        assert!(impact_gammas[0] > 0.0);
+        assert_eq!(std_gammas[0], 0.1);
+    }
+
+    #[test]
+    fn static_warm_start_vectors_validate_shape_and_bounds() {
+        let discrete = StaticDiscreteMemoryTrainingConfig {
+            initial_probability_vector: Some(Array1::from(vec![0.25, 0.75])),
+            initial_mask: Some(Array1::from(vec![0, 1])),
+            ..Default::default()
+        };
+        assert!(validate_static_discrete_training_config(&discrete).is_ok());
+        let bad_discrete = StaticDiscreteMemoryTrainingConfig {
+            initial_probability_vector: Some(Array1::from(vec![1.25])),
+            ..Default::default()
+        };
+        assert!(validate_static_discrete_training_config(&bad_discrete).is_err());
+
+        let continuous = StaticContinuousMemoryTrainingConfig {
+            initial_gammas: Some(Array1::from(vec![-0.1, 0.2])),
+            initial_impact_gammas: Some(Array1::from(vec![0.0, 1.0])),
+            ..Default::default()
+        };
+        assert!(validate_static_continuous_training_config(&continuous).is_ok());
+        let bad_continuous = StaticContinuousMemoryTrainingConfig {
+            initial_gammas: Some(Array1::from(vec![f64::NAN])),
+            ..Default::default()
+        };
+        assert!(validate_static_continuous_training_config(&bad_continuous).is_err());
     }
 }

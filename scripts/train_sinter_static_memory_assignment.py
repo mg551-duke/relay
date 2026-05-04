@@ -30,6 +30,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--basis-filter", type=str, default="none")
     parser.add_argument("--max-circuits", type=int, default=1)
     parser.add_argument("--assignment-mode", choices=["discrete", "continuous", "both"], default="both")
+    parser.add_argument("--discrete-optimizer", choices=["cem", "nes"], default="cem")
+    parser.add_argument("--continuous-optimizer", choices=["cem", "nes"], default="cem")
+    parser.add_argument("--warm-start-base", type=Path, default=None)
+    parser.add_argument("--warm-start-mode", choices=["none", "same-seed", "best-seed"], default="same-seed")
     parser.add_argument("--train-shots", type=int, default=150_000)
     parser.add_argument("--validation-shots", type=int, default=150_000)
     parser.add_argument("--seed", type=int, default=0)
@@ -69,6 +73,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--initial-std", type=float, default=0.05)
     parser.add_argument("--std-floor", type=float, default=0.001)
     parser.add_argument("--smoothing", type=float, default=0.7)
+    parser.add_argument("--discrete-nes-learning-rate", type=float, default=0.7)
+    parser.add_argument("--continuous-nes-learning-rate", type=float, default=0.2)
+    parser.add_argument("--continuous-nes-sigma-learning-rate", type=float, default=0.05)
+    parser.add_argument("--continuous-nes-impact-decay", type=float, default=0.9)
+    parser.add_argument("--continuous-sigma-min", type=float, default=0.0001)
+    parser.add_argument("--continuous-sigma-max", type=float, default=0.25)
     parser.add_argument("--train-max-logical-failures", type=int, default=50)
     parser.add_argument("--validation-max-logical-failures", type=int, default=0)
     parser.add_argument("--no-resume", action="store_true")
@@ -156,6 +166,7 @@ def _run_discrete(
         return {"best_candidate": _load_json(best_params_path)}
 
     resume_state = _load_checkpoint_mode(args.output_dir / "checkpoint_latest.npz", "discrete", args.no_resume)
+    warm_start = _load_discrete_warm_start(args)
 
     def progress_callback(progress: dict[str, Any]) -> None:
         progress = _json_ready(progress)
@@ -181,6 +192,10 @@ def _run_discrete(
         distribution_repeats=args.distribution_repeats,
         probability_floor=args.probability_floor,
         smoothing=args.smoothing,
+        optimizer=args.discrete_optimizer,
+        nes_learning_rate=args.discrete_nes_learning_rate,
+        initial_probability_vector=warm_start["initial_probability_vector"],
+        initial_mask=warm_start["initial_mask"],
         train_max_logical_failures=_positive_or_none(args.train_max_logical_failures),
         validation_max_logical_failures=_positive_or_none(args.validation_max_logical_failures),
         seed=args.seed,
@@ -224,6 +239,9 @@ def _run_continuous(
         return {"best_candidate": _load_json(best_params_path)}
 
     resume_state = _load_checkpoint_mode(args.output_dir / "checkpoint_latest.npz", "continuous", args.no_resume)
+    warm_start_gammas = _load_continuous_warm_start(args)
+    if warm_start_gammas is not None:
+        initial_gammas = warm_start_gammas
 
     def progress_callback(progress: dict[str, Any]) -> None:
         progress = _json_ready(progress)
@@ -253,6 +271,12 @@ def _run_continuous(
         initial_std=args.initial_std,
         std_floor=args.std_floor,
         smoothing=args.smoothing,
+        optimizer=args.continuous_optimizer,
+        nes_learning_rate=args.continuous_nes_learning_rate,
+        nes_sigma_learning_rate=args.continuous_nes_sigma_learning_rate,
+        nes_impact_decay=args.continuous_nes_impact_decay,
+        sigma_min=args.continuous_sigma_min,
+        sigma_max=args.continuous_sigma_max,
         train_max_logical_failures=_positive_or_none(args.train_max_logical_failures),
         validation_max_logical_failures=_positive_or_none(args.validation_max_logical_failures),
         seed=args.seed + 1_000_000,
@@ -262,7 +286,14 @@ def _run_continuous(
     )
     result = _json_ready(result)
     gammas = np.asarray(result["best_candidate"]["gammas"], dtype=np.float64)
+    mean_gammas = np.asarray(result["final_mean_gammas"], dtype=np.float64)
+    std_gammas = np.asarray(result["final_std_gammas"], dtype=np.float64)
+    impact_gammas = np.asarray(result.get("final_impact_gammas", []), dtype=np.float64)
     np.save(args.output_dir / "continuous_best_static_gammas.npy", gammas.reshape(1, -1))
+    np.save(args.output_dir / "continuous_mean_gammas.npy", mean_gammas)
+    np.save(args.output_dir / "continuous_sigma_gammas.npy", std_gammas)
+    if impact_gammas.size:
+        np.save(args.output_dir / "continuous_impact_vector.npy", impact_gammas)
 
     best_payload = _best_payload(
         result["best_candidate"],
@@ -367,6 +398,9 @@ def _config_payload(args: argparse.Namespace, circuit_path: Path, basis_filter: 
 def _best_payload(candidate: dict[str, Any], *, mode: str, args: argparse.Namespace, artifact_path: Path) -> dict[str, Any]:
     payload = dict(candidate)
     payload["assignment_mode"] = mode
+    payload["optimizer"] = args.discrete_optimizer if mode == "discrete" else args.continuous_optimizer
+    payload["warm_start_base"] = str(args.warm_start_base) if args.warm_start_base is not None else None
+    payload["warm_start_mode"] = args.warm_start_mode
     payload["seed_params"] = {
         "negative": float(args.negative),
         "positive": float(args.positive),
@@ -397,6 +431,8 @@ def _write_generation_csv(path: Path, checkpoint: dict[str, Any]) -> None:
                 "state_mean": "",
                 "state_std": "",
                 "positive_fraction": "",
+                "impact_mean": "",
+                "impact_std": "",
             }
             if mode == "discrete":
                 probabilities = np.asarray(record["probability_vector"], dtype=np.float64)
@@ -409,6 +445,10 @@ def _write_generation_csv(path: Path, checkpoint: dict[str, Any]) -> None:
                 std_gammas = np.asarray(record["std_gammas"], dtype=np.float64)
                 row["state_mean"] = float(mean_gammas.mean())
                 row["state_std"] = float(std_gammas.mean())
+                if "impact_gammas" in record:
+                    impact_gammas = np.asarray(record["impact_gammas"], dtype=np.float64)
+                    row["impact_mean"] = float(impact_gammas.mean())
+                    row["impact_std"] = float(impact_gammas.std())
             rows.append(row)
     with path.open("w", newline="", encoding="utf-8") as handle:
         fieldnames = list(rows[0].keys()) if rows else ["mode", "generation"]
@@ -464,13 +504,141 @@ def _load_static_gamma_vector(path: Path) -> np.ndarray:
     return gammas
 
 
+def _load_discrete_warm_start(args: argparse.Namespace) -> dict[str, np.ndarray | None]:
+    state: dict[str, np.ndarray | None] = {
+        "initial_probability_vector": None,
+        "initial_mask": None,
+    }
+    directory = _resolve_warm_start_dir(args, "discrete")
+    if directory is None:
+        return state
+
+    probability_path = directory / "discrete_probability_vector.npy"
+    mask_path = directory / "discrete_best_mask.npy"
+    gammas_path = directory / "discrete_best_static_gammas.npy"
+
+    if probability_path.exists():
+        probabilities = np.asarray(np.load(probability_path), dtype=np.float64)
+        if probabilities.ndim != 1:
+            raise ValueError(f"Expected 1D discrete probability vector in {probability_path}; got {probabilities.shape}.")
+        state["initial_probability_vector"] = probabilities
+        print(f"Warm-starting discrete probabilities from {probability_path}")
+
+    if mask_path.exists():
+        mask = np.asarray(np.load(mask_path), dtype=np.uint8)
+        if mask.ndim != 1:
+            raise ValueError(f"Expected 1D discrete mask in {mask_path}; got {mask.shape}.")
+        state["initial_mask"] = mask
+        print(f"Warm-starting discrete best mask from {mask_path}")
+    elif gammas_path.exists():
+        gammas = _load_static_gamma_vector(gammas_path)
+        midpoint = 0.5 * (float(args.negative) + float(args.positive))
+        state["initial_mask"] = (gammas >= midpoint).astype(np.uint8)
+        print(f"Warm-starting discrete mask converted from {gammas_path}")
+
+    return state
+
+
+def _load_continuous_warm_start(args: argparse.Namespace) -> np.ndarray | None:
+    directory = _resolve_warm_start_dir(args, "continuous")
+    for path in _continuous_warm_start_candidates(args, directory):
+        if path.exists():
+            print(f"Warm-starting continuous gammas from {path}")
+            return _load_static_gamma_vector(path)
+    return None
+
+
+def _continuous_warm_start_candidates(args: argparse.Namespace, directory: Path | None) -> list[Path]:
+    paths: list[Path] = []
+    if directory is not None:
+        paths.append(directory / "continuous_best_static_gammas.npy")
+        paths.append(directory / "discrete_best_static_gammas.npy")
+
+    fallback_dir = _matching_discrete_warm_start_dir(args)
+    if fallback_dir is not None and fallback_dir != directory:
+        paths.append(fallback_dir / "discrete_best_static_gammas.npy")
+    return paths
+
+
+def _resolve_warm_start_dir(args: argparse.Namespace, mode: str) -> Path | None:
+    if args.warm_start_mode == "none" or args.warm_start_base is None:
+        return None
+    base = args.warm_start_base
+    if args.warm_start_mode == "same-seed":
+        if _warm_start_dir_has_artifact(base, mode):
+            return base
+        seed_dir = base / f"seed_{args.seed}"
+        if seed_dir.exists():
+            return seed_dir
+        return None
+    return _best_seed_warm_start_dir(base, mode)
+
+
+def _matching_discrete_warm_start_dir(args: argparse.Namespace) -> Path | None:
+    if args.warm_start_mode == "none" or args.warm_start_base is None:
+        return None
+    base = Path(str(args.warm_start_base).replace("static_continuous_memory", "static_discrete_memory"))
+    shadow = argparse.Namespace(**vars(args))
+    shadow.warm_start_base = base
+    return _resolve_warm_start_dir(shadow, "discrete")
+
+
+def _warm_start_dir_has_artifact(directory: Path, mode: str) -> bool:
+    if mode == "discrete":
+        names = [
+            "discrete_probability_vector.npy",
+            "discrete_best_mask.npy",
+            "discrete_best_static_gammas.npy",
+        ]
+    else:
+        names = [
+            "continuous_best_static_gammas.npy",
+            "discrete_best_static_gammas.npy",
+        ]
+    return any((directory / name).exists() for name in names)
+
+
+def _best_seed_warm_start_dir(base: Path, mode: str) -> Path | None:
+    directories = [base] if _warm_start_dir_has_artifact(base, mode) else sorted(base.glob("seed_*"))
+    best_dir: Path | None = None
+    best_metrics: dict[str, Any] | None = None
+    params_name = f"{mode}_best_params.json"
+    for directory in directories:
+        params_path = directory / params_name
+        if not params_path.exists() and mode == "continuous":
+            params_path = directory / "discrete_best_params.json"
+        if not params_path.exists():
+            continue
+        try:
+            payload = _load_json(params_path)
+            metrics = payload.get("metrics", {})
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(metrics, dict):
+            continue
+        if best_metrics is None or _metrics_key(metrics) < _metrics_key(best_metrics):
+            best_metrics = metrics
+            best_dir = directory
+    return best_dir
+
+
+def _metrics_key(metrics: dict[str, Any]) -> tuple[float, float, float]:
+    return (
+        float(metrics.get("logical_failure_rate", float("inf"))),
+        float(metrics.get("mean_iterations", float("inf"))),
+        -float(metrics.get("convergence_rate", 0.0)),
+    )
+
+
 def _progress_line(mode: str, progress: dict[str, Any]) -> str:
     best = progress["best_candidate"]
+    generation_best = progress.get("generation_record", {}).get("best_candidate")
     return json.dumps(
         {
             "mode": mode,
             "completed_generations": progress["completed_generations"],
             "best_metrics": best["metrics"],
+            "generation_best_metrics": generation_best.get("metrics") if generation_best else None,
         },
         sort_keys=True,
     )

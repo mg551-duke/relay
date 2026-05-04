@@ -17,7 +17,7 @@ use relay_bp::training::{
     StaticContinuousMemoryTrainingConfig, StaticContinuousTrainingProgress,
     StaticContinuousTrainingResumeState, StaticDiscreteCandidateResult,
     StaticDiscreteGenerationRecord, StaticDiscreteMemoryTrainingConfig,
-    StaticDiscreteTrainingProgress, StaticDiscreteTrainingResumeState,
+    StaticDiscreteTrainingProgress, StaticDiscreteTrainingResumeState, StaticMemoryOptimizer,
 };
 
 #[pyfunction]
@@ -239,6 +239,10 @@ pub fn train_relayed_bpgd_bernoulli_memory_py<'py>(
     distribution_repeats=1,
     probability_floor=0.001,
     smoothing=0.7,
+    optimizer="cem".to_string(),
+    nes_learning_rate=0.7,
+    initial_probability_vector=None,
+    initial_mask=None,
     train_max_logical_failures=None,
     validation_max_logical_failures=None,
     seed=0,
@@ -281,6 +285,10 @@ pub fn train_relayed_bpgd_static_discrete_memory_py<'py>(
     distribution_repeats: usize,
     probability_floor: f64,
     smoothing: f64,
+    optimizer: String,
+    nes_learning_rate: f64,
+    initial_probability_vector: Option<PyReadonlyArray1<'_, f64>>,
+    initial_mask: Option<PyReadonlyArray1<'_, Bit>>,
     train_max_logical_failures: Option<usize>,
     validation_max_logical_failures: Option<usize>,
     seed: u64,
@@ -325,6 +333,11 @@ pub fn train_relayed_bpgd_static_discrete_memory_py<'py>(
         distribution_repeats,
         probability_floor,
         smoothing,
+        optimizer: parse_static_memory_optimizer(&optimizer)?,
+        nes_learning_rate,
+        initial_probability_vector: initial_probability_vector
+            .map(|probabilities| probabilities.as_array().to_owned()),
+        initial_mask: initial_mask.map(|mask| mask.as_array().to_owned()),
         train_max_logical_failures,
         validation_max_logical_failures,
         seed,
@@ -415,10 +428,17 @@ pub fn train_relayed_bpgd_static_discrete_memory_py<'py>(
     initial_std=0.05,
     std_floor=0.001,
     smoothing=0.7,
+    optimizer="cem".to_string(),
+    nes_learning_rate=0.2,
+    nes_sigma_learning_rate=0.05,
+    nes_impact_decay=0.9,
+    sigma_min=0.0001,
+    sigma_max=0.25,
     train_max_logical_failures=None,
     validation_max_logical_failures=None,
     seed=0,
     initial_gammas=None,
+    initial_impact_gammas=None,
     resume_state=None,
     progress_callback=None
 ))]
@@ -462,10 +482,17 @@ pub fn train_relayed_bpgd_static_continuous_memory_py<'py>(
     initial_std: f64,
     std_floor: f64,
     smoothing: f64,
+    optimizer: String,
+    nes_learning_rate: f64,
+    nes_sigma_learning_rate: f64,
+    nes_impact_decay: f64,
+    sigma_min: f64,
+    sigma_max: f64,
     train_max_logical_failures: Option<usize>,
     validation_max_logical_failures: Option<usize>,
     seed: u64,
     initial_gammas: Option<PyReadonlyArray1<'_, f64>>,
+    initial_impact_gammas: Option<PyReadonlyArray1<'_, f64>>,
     resume_state: Option<&Bound<'_, PyDict>>,
     progress_callback: Option<Py<PyAny>>,
 ) -> PyResult<Bound<'py, PyDict>> {
@@ -511,10 +538,17 @@ pub fn train_relayed_bpgd_static_continuous_memory_py<'py>(
         initial_std,
         std_floor,
         smoothing,
+        optimizer: parse_static_memory_optimizer(&optimizer)?,
+        nes_learning_rate,
+        nes_sigma_learning_rate,
+        nes_impact_decay,
+        sigma_min,
+        sigma_max,
         train_max_logical_failures,
         validation_max_logical_failures,
         seed,
         initial_gammas: initial_gammas.map(|gammas| gammas.as_array().to_owned()),
+        initial_impact_gammas: initial_impact_gammas.map(|impact| impact.as_array().to_owned()),
     };
     let resume_state = match resume_state {
         Some(state) => Some(static_continuous_resume_state_from_dict(state)?),
@@ -558,7 +592,18 @@ pub fn train_relayed_bpgd_static_continuous_memory_py<'py>(
     )?;
     payload.set_item("final_mean_gammas", result.final_mean_gammas.to_vec())?;
     payload.set_item("final_std_gammas", result.final_std_gammas.to_vec())?;
+    payload.set_item("final_impact_gammas", result.final_impact_gammas.to_vec())?;
     Ok(payload)
+}
+
+fn parse_static_memory_optimizer(value: &str) -> PyResult<StaticMemoryOptimizer> {
+    match value {
+        "cem" => Ok(StaticMemoryOptimizer::Cem),
+        "nes" => Ok(StaticMemoryOptimizer::Nes),
+        other => Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "unknown static memory optimizer {other:?}; expected 'cem' or 'nes'"
+        ))),
+    }
 }
 
 fn resume_state_from_dict(dict: &Bound<'_, PyDict>) -> PyResult<BernoulliTrainingResumeState> {
@@ -761,11 +806,22 @@ fn static_continuous_candidate_from_any(
 fn static_continuous_generation_record_from_any(
     value: &Bound<'_, PyAny>,
 ) -> PyResult<StaticContinuousGenerationRecord> {
+    let dict = value.downcast::<PyDict>()?;
+    let mean_gammas = extract_f64_vector(&required_item(dict, "mean_gammas")?, "mean_gammas")?;
+    let std_gammas = extract_f64_vector(&required_item(dict, "std_gammas")?, "std_gammas")?;
+    let impact_gammas = match dict.get_item("impact_gammas")? {
+        Some(item) => extract_f64_vector(&item, "impact_gammas")?,
+        None => ndarray::Array1::zeros(mean_gammas.len()),
+    };
     Ok(StaticContinuousGenerationRecord {
-        generation: value.get_item("generation")?.extract()?,
-        mean_gammas: extract_f64_vector(&value.get_item("mean_gammas")?, "mean_gammas")?,
-        std_gammas: extract_f64_vector(&value.get_item("std_gammas")?, "std_gammas")?,
-        best_candidate: static_continuous_candidate_from_any(&value.get_item("best_candidate")?)?,
+        generation: required_item(dict, "generation")?.extract()?,
+        mean_gammas,
+        std_gammas,
+        impact_gammas,
+        best_candidate: static_continuous_candidate_from_any(&required_item(
+            dict,
+            "best_candidate",
+        )?)?,
     })
 }
 
@@ -792,6 +848,10 @@ fn static_continuous_resume_state_from_dict(
         &required_item(dict, "final_std_gammas")?,
         "final_std_gammas",
     )?;
+    let impact_gammas = match dict.get_item("final_impact_gammas")? {
+        Some(item) => extract_f64_vector(&item, "final_impact_gammas")?,
+        None => ndarray::Array1::zeros(mean_gammas.len()),
+    };
     let best_candidate = match dict.get_item("best_candidate")? {
         Some(item) => Some(static_continuous_candidate_from_any(&item)?),
         None => None,
@@ -804,6 +864,7 @@ fn static_continuous_resume_state_from_dict(
         completed_generations,
         mean_gammas,
         std_gammas,
+        impact_gammas,
         best_candidate,
         generation_records,
     })
@@ -991,6 +1052,7 @@ fn static_continuous_generation_record_to_dict<'py>(
     dict.set_item("generation", record.generation)?;
     dict.set_item("mean_gammas", record.mean_gammas.to_vec())?;
     dict.set_item("std_gammas", record.std_gammas.to_vec())?;
+    dict.set_item("impact_gammas", record.impact_gammas.to_vec())?;
     dict.set_item(
         "best_candidate",
         static_continuous_candidate_to_dict(py, &record.best_candidate)?,
@@ -1029,6 +1091,7 @@ fn static_continuous_progress_to_dict<'py>(
     )?;
     dict.set_item("final_mean_gammas", progress.final_mean_gammas.to_vec())?;
     dict.set_item("final_std_gammas", progress.final_std_gammas.to_vec())?;
+    dict.set_item("final_impact_gammas", progress.final_impact_gammas.to_vec())?;
     Ok(dict)
 }
 
