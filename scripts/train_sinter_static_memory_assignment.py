@@ -503,6 +503,8 @@ def _json_ready(value: Any) -> Any:
         return {str(key): _json_ready(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [_json_ready(item) for item in value]
+    if isinstance(value, (bytes, bytearray)):
+        return list(value)
     if isinstance(value, Path):
         return str(value)
     if isinstance(value, np.ndarray):

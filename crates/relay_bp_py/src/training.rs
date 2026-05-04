@@ -916,7 +916,8 @@ fn static_discrete_candidate_to_dict<'py>(
     candidate: &StaticDiscreteCandidateResult,
 ) -> PyResult<Bound<'py, PyDict>> {
     let dict = PyDict::new(py);
-    dict.set_item("mask", candidate.mask.to_vec())?;
+    let mask: Vec<usize> = candidate.mask.iter().map(|bit| *bit as usize).collect();
+    dict.set_item("mask", mask)?;
     dict.set_item("gammas", candidate.gammas.to_vec())?;
     dict.set_item("metrics", metrics_to_dict(py, &candidate.metrics)?)?;
     Ok(dict)
