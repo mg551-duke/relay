@@ -213,7 +213,7 @@ impl Default for StaticDiscreteMemoryTrainingConfig {
             train_max_logical_failures: None,
             validation_max_logical_failures: None,
             seed: 0,
-            nes_learning_rate: 0.7,
+            nes_learning_rate: 0.15,
             initial_probability_vector: None,
             initial_mask: None,
         }
@@ -884,7 +884,16 @@ fn train_relayed_bpgd_static_discrete_memory_nes_with_progress(
     }
 
     for generation in start_generation..training_config.generations {
-        let masks = sample_static_discrete_masks(&probability_vector, generation, &training_config);
+        let anchor_mask = best_overall
+            .as_ref()
+            .map(|candidate| candidate.mask.clone())
+            .unwrap_or_else(|| static_discrete_threshold_mask(&probability_vector));
+        let masks = sample_static_discrete_nes_masks(
+            &probability_vector,
+            &anchor_mask,
+            generation,
+            &training_config,
+        );
         let results = evaluate_static_discrete_masks(
             &problem,
             &decoder_config,
@@ -899,12 +908,27 @@ fn train_relayed_bpgd_static_discrete_memory_nes_with_progress(
             .first()
             .cloned()
             .ok_or_else(|| "No static discrete NES candidates were evaluated.".to_string())?;
-        if best_overall
-            .as_ref()
-            .map(|best| is_better_static_discrete_candidate(&generation_best, best))
-            .unwrap_or(true)
-        {
-            best_overall = Some(generation_best.clone());
+        let canonical_candidates = ranked_results
+            .iter()
+            .take(training_config.elite_count.min(3))
+            .map(|candidate| candidate.mask.clone())
+            .collect::<Vec<_>>();
+        for candidate_mask in canonical_candidates {
+            let candidate = evaluate_static_discrete_mask_candidate(
+                &problem,
+                &decoder_config,
+                &training_config,
+                candidate_mask.view(),
+                static_discrete_selection_seed(&training_config),
+                false,
+            );
+            if best_overall
+                .as_ref()
+                .map(|best| is_better_static_discrete_candidate(&candidate, best))
+                .unwrap_or(true)
+            {
+                best_overall = Some(candidate);
+            }
         }
 
         let utilities = rank_utilities_for_discrete_results(&results);
@@ -917,6 +941,14 @@ fn train_relayed_bpgd_static_discrete_memory_nes_with_progress(
         );
         probability_vector = logits.mapv(probability_from_logit);
         clamp_probability_vector(&mut probability_vector, training_config.probability_floor);
+        if let Some(best_candidate) = best_overall.as_ref() {
+            pull_static_discrete_probabilities_toward_anchor(
+                &mut probability_vector,
+                best_candidate.mask.view(),
+                training_config.probability_floor,
+                training_config.nes_learning_rate,
+            );
+        }
         logits = probability_vector.mapv(logit_from_probability);
 
         generation_records.push(StaticDiscreteGenerationRecord {
@@ -1341,13 +1373,21 @@ fn evaluate_initial_static_discrete_mask(
     }))
 }
 
+fn static_discrete_selection_seed(config: &StaticDiscreteMemoryTrainingConfig) -> u64 {
+    config.seed.wrapping_add(4_000_003)
+}
+
+fn static_discrete_threshold_mask(probability_vector: &Array1<f64>) -> Array1<Bit> {
+    probability_vector.mapv(|probability| if probability >= 0.5 { 1 } else { 0 })
+}
+
 fn sample_static_discrete_masks(
     probability_vector: &Array1<f64>,
     generation: usize,
     config: &StaticDiscreteMemoryTrainingConfig,
 ) -> Vec<Array1<Bit>> {
     let mut candidates = Vec::with_capacity(config.candidate_count);
-    candidates.push(probability_vector.mapv(|probability| if probability >= 0.5 { 1 } else { 0 }));
+    candidates.push(static_discrete_threshold_mask(probability_vector));
     if generation == 0 && candidates.len() < config.candidate_count {
         if let Some(initial_mask) = config.initial_mask.as_ref() {
             if initial_mask.len() == probability_vector.len() {
@@ -1378,12 +1418,143 @@ fn sample_static_discrete_masks(
     candidates
 }
 
+fn sample_static_discrete_nes_masks(
+    probability_vector: &Array1<f64>,
+    anchor_mask: &Array1<Bit>,
+    generation: usize,
+    config: &StaticDiscreteMemoryTrainingConfig,
+) -> Vec<Array1<Bit>> {
+    let mut candidates = Vec::with_capacity(config.candidate_count);
+    push_unique_static_discrete_mask(&mut candidates, anchor_mask.clone());
+    if generation == 0 {
+        if let Some(initial_mask) = config.initial_mask.as_ref() {
+            if initial_mask.len() == probability_vector.len() {
+                push_unique_static_discrete_mask(&mut candidates, initial_mask.clone());
+            }
+        }
+    }
+    push_unique_static_discrete_mask(
+        &mut candidates,
+        static_discrete_threshold_mask(probability_vector),
+    );
+
+    let max_flips = 1 + (generation / 3).min(3);
+    let mut candidate_idx = 1usize;
+    while candidates.len() < config.candidate_count {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(
+            config
+                .seed
+                .wrapping_add(1_000_003 * generation as u64)
+                .wrapping_add(97_531 * candidate_idx as u64),
+        );
+        let flips = 1 + (rng.gen::<usize>() % max_flips.max(1));
+        let mut mask = anchor_mask.clone();
+        let mut touched = vec![false; mask.len()];
+        let mut flipped = 0usize;
+        let mut attempts = 0usize;
+        while flipped < flips && attempts < flips.saturating_mul(16).max(16) {
+            attempts += 1;
+            let Some(index) = sample_static_discrete_mutation_index(
+                probability_vector,
+                anchor_mask.view(),
+                &mut rng,
+            ) else {
+                break;
+            };
+            if touched[index] {
+                continue;
+            }
+            touched[index] = true;
+            mask[index] ^= 1;
+            flipped += 1;
+        }
+        candidates.push(mask);
+        candidate_idx += 1;
+    }
+    candidates
+}
+
+fn push_unique_static_discrete_mask(candidates: &mut Vec<Array1<Bit>>, mask: Array1<Bit>) {
+    if !candidates.iter().any(|candidate| candidate == &mask) {
+        candidates.push(mask);
+    }
+}
+
+fn sample_static_discrete_mutation_index(
+    probability_vector: &Array1<f64>,
+    anchor_mask: ArrayView1<Bit>,
+    rng: &mut rand::rngs::StdRng,
+) -> Option<usize> {
+    if probability_vector.is_empty() {
+        return None;
+    }
+    let total_weight = probability_vector
+        .iter()
+        .zip(anchor_mask.iter())
+        .map(|(probability, anchor_bit)| {
+            let anchor_probability = if *anchor_bit != 0 {
+                *probability
+            } else {
+                1.0 - *probability
+            };
+            (1.0 - anchor_probability).max(1.0e-6)
+        })
+        .sum::<f64>();
+    if total_weight <= 0.0 || !total_weight.is_finite() {
+        return Some(rng.gen::<usize>() % probability_vector.len());
+    }
+    let mut draw = rng.gen::<f64>() * total_weight;
+    for (idx, (probability, anchor_bit)) in probability_vector
+        .iter()
+        .zip(anchor_mask.iter())
+        .enumerate()
+    {
+        let anchor_probability = if *anchor_bit != 0 {
+            *probability
+        } else {
+            1.0 - *probability
+        };
+        draw -= (1.0 - anchor_probability).max(1.0e-6);
+        if draw <= 0.0 {
+            return Some(idx);
+        }
+    }
+    Some(probability_vector.len() - 1)
+}
+
 fn static_discrete_mask_to_gammas(
     mask: ArrayView1<Bit>,
     negative: f64,
     positive: f64,
 ) -> Array1<f64> {
     mask.mapv(|bit| if bit != 0 { positive } else { negative })
+}
+
+fn evaluate_static_discrete_mask_candidate(
+    problem: &BernoulliTrainingProblem,
+    decoder_config: &RelayedBpgdTrainingDecoderConfig,
+    training_config: &StaticDiscreteMemoryTrainingConfig,
+    mask: ArrayView1<Bit>,
+    seed: u64,
+    validation: bool,
+) -> StaticDiscreteCandidateResult {
+    let gammas =
+        static_discrete_mask_to_gammas(mask, training_config.negative, training_config.positive);
+    let metrics = evaluate_static_gammas(
+        problem,
+        decoder_config,
+        gammas.view(),
+        training_config.distribution_repeats,
+        training_config.train_max_logical_failures,
+        training_config.validation_max_logical_failures,
+        seed,
+        validation,
+    );
+    StaticDiscreteCandidateResult {
+        mask: mask.to_owned(),
+        gammas,
+        metrics,
+    }
 }
 
 fn evaluate_static_discrete_masks(
@@ -1667,6 +1838,22 @@ fn update_static_discrete_logits_from_utilities(
     }
     for idx in 0..logits.len() {
         logits[idx] += learning_rate * gradient[idx];
+    }
+}
+
+fn pull_static_discrete_probabilities_toward_anchor(
+    probability_vector: &mut Array1<f64>,
+    anchor_mask: ArrayView1<Bit>,
+    probability_floor: f64,
+    learning_rate: f64,
+) {
+    let pull = learning_rate.clamp(0.05, 0.2);
+    let low = probability_floor.max(0.05).min(0.5);
+    let high = (1.0 - probability_floor).min(0.95).max(0.5);
+    for (probability, anchor_bit) in probability_vector.iter_mut().zip(anchor_mask.iter()) {
+        let target = if *anchor_bit != 0 { high } else { low };
+        *probability = ((1.0 - pull) * *probability + pull * target)
+            .clamp(probability_floor, 1.0 - probability_floor);
     }
 }
 

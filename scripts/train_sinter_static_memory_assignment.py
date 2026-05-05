@@ -73,7 +73,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--initial-std", type=float, default=0.05)
     parser.add_argument("--std-floor", type=float, default=0.001)
     parser.add_argument("--smoothing", type=float, default=0.7)
-    parser.add_argument("--discrete-nes-learning-rate", type=float, default=0.7)
+    parser.add_argument("--discrete-nes-learning-rate", type=float, default=0.15)
     parser.add_argument("--continuous-nes-learning-rate", type=float, default=0.2)
     parser.add_argument("--continuous-nes-sigma-learning-rate", type=float, default=0.05)
     parser.add_argument("--continuous-nes-impact-decay", type=float, default=0.9)

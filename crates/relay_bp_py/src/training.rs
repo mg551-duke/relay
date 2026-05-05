@@ -240,7 +240,7 @@ pub fn train_relayed_bpgd_bernoulli_memory_py<'py>(
     probability_floor=0.001,
     smoothing=0.7,
     optimizer="cem".to_string(),
-    nes_learning_rate=0.7,
+    nes_learning_rate=0.15,
     initial_probability_vector=None,
     initial_mask=None,
     train_max_logical_failures=None,
