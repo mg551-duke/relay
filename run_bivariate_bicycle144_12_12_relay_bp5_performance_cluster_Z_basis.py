@@ -12,9 +12,11 @@ but focuses on six Relay-BP-5 variants:
 4. Relay-BP-5 with trained two-point discrete memory and damping 0.9
 5. Relay-BP-5 with trained two-point discrete memory and damping in [0.85, 0.95]
 6. Relay-BP-5 with continuous interval memory and damping 0.9
+7. Relay-BP-5 with the top-10 trained static discrete assignments and damping 0.9
 
 Two optional static-assignment decoders can be appended with
-`--static-discrete-gammas-path` and `--static-continuous-gammas-path`.
+`--static-discrete-gammas-path`, `--static-continuous-gammas-path`, and
+`--static-discrete-assignment-bank-base`.
 
 Shared decoder settings:
 - p sweep: 0.001, 0.002, 0.003, 0.004, 0.005
@@ -96,8 +98,12 @@ DEFAULT_DECODER_SEQUENCE = [
 ]
 STATIC_DISCRETE_DECODER_NAME = "relay-bp5-r601-static-discrete-memory"
 STATIC_CONTINUOUS_DECODER_NAME = "relay-bp5-r601-static-continuous-memory"
+STATIC_DISCRETE_TOPK_DAMP_DECODER_NAME = (
+    "relay-bp5-r601-static-discrete-top10-damp0p9"
+)
 DEFAULT_DECODER_INDICES: list[int] | None = None
 DEFAULT_MAX_BATCH_SIZE = 64
+DEFAULT_STATIC_DISCRETE_ASSIGNMENT_BANK_TOP_K = 10
 
 
 def find_repo_root(start: Path) -> Path:
@@ -165,6 +171,193 @@ def load_static_gammas(path: Path | None) -> tuple[np.ndarray | None, dict[str, 
         "sha256": file_sha256(resolved),
     }
     return gammas, metadata
+
+
+def metrics_rank_key(metrics: dict[str, Any]) -> tuple[float, float, float]:
+    return (
+        float(metrics.get("logical_failure_rate", float("inf"))),
+        float(metrics.get("mean_iterations", float("inf"))),
+        -float(metrics.get("convergence_rate", 0.0)),
+    )
+
+
+def load_static_discrete_assignment_bank(
+    base_path: Path | None,
+    *,
+    top_k: int = DEFAULT_STATIC_DISCRETE_ASSIGNMENT_BANK_TOP_K,
+) -> tuple[np.ndarray | None, dict[str, Any] | None]:
+    if base_path is None:
+        return None, None
+    if top_k <= 0:
+        raise ValueError(f"top_k must be positive; got {top_k}.")
+
+    resolved = base_path.resolve()
+    if not resolved.exists():
+        raise FileNotFoundError(
+            f"Static discrete assignment bank base does not exist: {resolved}"
+        )
+
+    seed_dirs = [
+        directory
+        for directory in resolved.iterdir()
+        if directory.is_dir() and directory.name.startswith("seed_")
+    ]
+    candidate_dirs = sorted(seed_dirs, key=seed_dir_sort_key)
+    if not candidate_dirs and (resolved / "discrete_best_static_gammas.npy").exists():
+        candidate_dirs = [resolved]
+
+    candidates: list[dict[str, Any]] = []
+    skipped: list[dict[str, str]] = []
+    expected_width: int | None = None
+    for seed_dir in candidate_dirs:
+        gammas_path = seed_dir / "discrete_best_static_gammas.npy"
+        if not gammas_path.exists():
+            skipped.append(
+                {"seed_dir": str(seed_dir.resolve()), "reason": "missing gammas"}
+            )
+            continue
+
+        metrics, metrics_source, metrics_path = load_static_discrete_metrics(seed_dir)
+        if metrics is None or metrics_source is None or metrics_path is None:
+            skipped.append(
+                {"seed_dir": str(seed_dir.resolve()), "reason": "missing metrics"}
+            )
+            continue
+
+        gammas = load_static_gamma_vector(gammas_path)
+        if expected_width is None:
+            expected_width = int(gammas.shape[0])
+        elif gammas.shape[0] != expected_width:
+            raise ValueError(
+                "Static assignment gamma width mismatch: "
+                f"{gammas_path.resolve()} has {gammas.shape[0]}, expected {expected_width}."
+            )
+
+        rank_key = metrics_rank_key(metrics)
+        candidates.append(
+            {
+                "seed_dir": str(seed_dir.resolve()),
+                "gammas_path": str(gammas_path.resolve()),
+                "gammas_sha256": file_sha256(gammas_path.resolve()),
+                "metrics_path": str(metrics_path.resolve()),
+                "metrics_source": metrics_source,
+                "metrics": metrics,
+                "rank_key": list(rank_key),
+                "gammas": gammas,
+            }
+        )
+
+    if len(candidates) < top_k:
+        raise ValueError(
+            f"Need at least {top_k} valid static discrete assignments under {resolved}; "
+            f"found {len(candidates)}. Skipped entries: {skipped}"
+        )
+
+    selected = sorted(candidates, key=lambda candidate: tuple(candidate["rank_key"]))[
+        :top_k
+    ]
+    ranked_bank = np.vstack([candidate["gammas"] for candidate in selected]).astype(
+        np.float64, copy=False
+    )
+    bank = relay_explicit_gammas_from_ranked_bank(ranked_bank)
+    metadata = {
+        "base_path": str(resolved),
+        "top_k": int(top_k),
+        "shape": [int(dim) for dim in bank.shape],
+        "ranked_shape": [int(dim) for dim in ranked_bank.shape],
+        "relay_rotation_indexing": (
+            "Relay continuation legs use explicit_gammas[set_idx % row_count] "
+            "with set_idx starting at 1; rows are shifted so leg 1 uses rank 1."
+        ),
+        "candidate_count": int(len(candidates)),
+        "skipped": skipped,
+        "selected_assignments": [
+            {
+                key: value
+                for key, value in candidate.items()
+                if key != "gammas"
+            }
+            for candidate in selected
+        ],
+    }
+    return bank, metadata
+
+
+def relay_explicit_gammas_from_ranked_bank(ranked_bank: np.ndarray) -> np.ndarray:
+    if ranked_bank.ndim != 2:
+        raise ValueError(
+            f"Expected a 2D ranked gamma bank; got shape {ranked_bank.shape}."
+        )
+    if ranked_bank.shape[0] <= 1:
+        return ranked_bank.copy()
+    return np.vstack([ranked_bank[-1:], ranked_bank[:-1]])
+
+
+def seed_dir_sort_key(path: Path) -> tuple[int, int | str]:
+    suffix = path.name.removeprefix("seed_")
+    try:
+        return (0, int(suffix))
+    except ValueError:
+        return (1, path.name)
+
+
+def load_static_discrete_metrics(
+    seed_dir: Path,
+) -> tuple[dict[str, Any] | None, str | None, Path | None]:
+    validation_path = seed_dir / "validation_metrics.json"
+    validation_payload = load_json_if_dict(validation_path)
+    if validation_payload is not None:
+        validation_metrics = validation_payload.get("discrete")
+        if isinstance(validation_metrics, dict):
+            return validation_metrics, "validation_metrics.json:discrete", validation_path
+
+    params_path = seed_dir / "discrete_best_params.json"
+    params_payload = load_json_if_dict(params_path)
+    if params_payload is not None:
+        metrics = params_payload.get("metrics")
+        if isinstance(metrics, dict):
+            return metrics, "discrete_best_params.json:metrics", params_path
+        best_candidate = params_payload.get("best_candidate")
+        if isinstance(best_candidate, dict) and isinstance(
+            best_candidate.get("metrics"), dict
+        ):
+            return (
+                best_candidate["metrics"],
+                "discrete_best_params.json:best_candidate.metrics",
+                params_path,
+            )
+
+    return None, None, None
+
+
+def load_json_if_dict(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"Expected JSON object in {path.resolve()}.")
+    return payload
+
+
+def load_static_gamma_vector(path: Path) -> np.ndarray:
+    gammas = np.asarray(np.load(path.resolve()), dtype=np.float64)
+    if gammas.ndim == 2:
+        if gammas.shape[0] != 1:
+            raise ValueError(
+                "Expected 1D or single-row static gammas in "
+                f"{path.resolve()}; got shape {gammas.shape}."
+            )
+        gammas = gammas[0]
+    if gammas.ndim != 1:
+        raise ValueError(
+            "Expected 1D or single-row static gammas in "
+            f"{path.resolve()}; got shape {gammas.shape}."
+        )
+    if not np.all(np.isfinite(gammas)):
+        raise ValueError(
+            f"Static gamma artifact contains non-finite values: {path.resolve()}"
+        )
+    return gammas
 
 
 def find_circuits(circuits_dir: Path, selected_p_values: list[float]) -> list[Path]:
@@ -353,6 +546,7 @@ def build_custom_decoders(
     *,
     static_discrete_gammas: np.ndarray | None = None,
     static_continuous_gammas: np.ndarray | None = None,
+    static_discrete_assignment_bank: np.ndarray | None = None,
 ) -> dict[str, Sampler]:
     common = dict(
         alpha=RELAY_ALPHA,
@@ -435,6 +629,16 @@ def build_custom_decoders(
                 explicit_gammas=static_continuous_gammas,
                 seed=RELAY_BASE_SEED + 7,
                 decoder_label=STATIC_CONTINUOUS_DECODER_NAME,
+            )
+        )
+    if static_discrete_assignment_bank is not None:
+        decoders[STATIC_DISCRETE_TOPK_DAMP_DECODER_NAME] = RelayBPIterationSampler(
+            decoder=SinterDecoder_RelayBP(
+                **common,
+                explicit_gammas=static_discrete_assignment_bank,
+                c_damp=RELAY_FIXED_DAMPING,
+                seed=RELAY_BASE_SEED + 8,
+                decoder_label=STATIC_DISCRETE_TOPK_DAMP_DECODER_NAME,
             )
         )
     return decoders
@@ -640,6 +844,7 @@ def build_setup_dict(
     max_batch_size: int,
     static_discrete_gammas_metadata: dict[str, Any] | None,
     static_continuous_gammas_metadata: dict[str, Any] | None,
+    static_discrete_assignment_bank_metadata: dict[str, Any] | None,
 ) -> dict[str, Any]:
     return {
         "repo_root": str(repo_root),
@@ -664,6 +869,7 @@ def build_setup_dict(
         "relay_bernoulli_gamma": list(RELAY_BERNOULLI_GAMMA),
         "static_discrete_gammas": static_discrete_gammas_metadata,
         "static_continuous_gammas": static_continuous_gammas_metadata,
+        "static_discrete_assignment_bank": static_discrete_assignment_bank_metadata,
         "decoder_sequence": list(decoder_sequence),
         "num_workers": int(num_workers),
         "max_batch_size": int(max_batch_size),
@@ -717,8 +923,12 @@ def validate_resume_setup(setup_json_path: Path, current_setup: dict[str, Any]) 
     ) != current_setup.get("relay_fixed_damping"):
         mismatches.append("relay_fixed_damping")
 
-    for field in ["static_discrete_gammas", "static_continuous_gammas"]:
-        if field in existing_setup and existing_setup.get(field) != current_setup.get(field):
+    for field in [
+        "static_discrete_gammas",
+        "static_continuous_gammas",
+        "static_discrete_assignment_bank",
+    ]:
+        if existing_setup.get(field) != current_setup.get(field):
             mismatches.append(field)
 
     if mismatches:
@@ -818,6 +1028,22 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional .npy static continuous gamma artifact to add as a comparison decoder.",
     )
+    parser.add_argument(
+        "--static-discrete-assignment-bank-base",
+        type=Path,
+        default=None,
+        help=(
+            "Optional training output base containing seed_*/discrete_best_static_gammas.npy "
+            "artifacts. The top static discrete assignments are stacked and rotated as a "
+            "damped comparison decoder."
+        ),
+    )
+    parser.add_argument(
+        "--static-discrete-assignment-bank-top-k",
+        type=int,
+        default=DEFAULT_STATIC_DISCRETE_ASSIGNMENT_BANK_TOP_K,
+        help="Number of ranked static discrete assignments to stack for the rotating bank.",
+    )
     return parser.parse_args()
 
 
@@ -859,16 +1085,26 @@ def main() -> None:
     static_continuous_gammas, static_continuous_gammas_metadata = load_static_gammas(
         args.static_continuous_gammas_path
     )
+    (
+        static_discrete_assignment_bank,
+        static_discrete_assignment_bank_metadata,
+    ) = load_static_discrete_assignment_bank(
+        args.static_discrete_assignment_bank_base,
+        top_k=args.static_discrete_assignment_bank_top_k,
+    )
 
     custom_decoders = build_custom_decoders(
         static_discrete_gammas=static_discrete_gammas,
         static_continuous_gammas=static_continuous_gammas,
+        static_discrete_assignment_bank=static_discrete_assignment_bank,
     )
     default_decoder_sequence = list(DEFAULT_DECODER_SEQUENCE)
     if static_discrete_gammas is not None:
         default_decoder_sequence.append(STATIC_DISCRETE_DECODER_NAME)
     if static_continuous_gammas is not None:
         default_decoder_sequence.append(STATIC_CONTINUOUS_DECODER_NAME)
+    if static_discrete_assignment_bank is not None:
+        default_decoder_sequence.append(STATIC_DISCRETE_TOPK_DAMP_DECODER_NAME)
     decoder_sequence = args.decoders or default_decoder_sequence
     unknown = [name for name in decoder_sequence if name not in custom_decoders]
     if unknown:
@@ -900,6 +1136,7 @@ def main() -> None:
         max_batch_size=max_batch_size,
         static_discrete_gammas_metadata=static_discrete_gammas_metadata,
         static_continuous_gammas_metadata=static_continuous_gammas_metadata,
+        static_discrete_assignment_bank_metadata=static_discrete_assignment_bank_metadata,
     )
     validate_resume_setup(setup_json, setup)
     setup_json.write_text(json.dumps(setup, indent=2, sort_keys=True), encoding="utf-8")
@@ -918,6 +1155,7 @@ def main() -> None:
     print("relay_bernoulli_gamma =", RELAY_BERNOULLI_GAMMA)
     print("static_discrete_gammas =", static_discrete_gammas_metadata)
     print("static_continuous_gammas =", static_continuous_gammas_metadata)
+    print("static_discrete_assignment_bank =", static_discrete_assignment_bank_metadata)
     print("decoders =", decoder_sequence)
     if args.decoder_indices is None:
         print("selected_decoder_indices = all")
