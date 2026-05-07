@@ -655,7 +655,7 @@ pub fn train_relayed_bpgd_bernoulli_message_mix_with_progress(
     let mut raw_mean = resume_state
         .as_ref()
         .map(|state| state.raw_mean)
-        .unwrap_or([0.0_f64; 6]);
+        .unwrap_or_else(|| initial_message_mix_raw_mean(&training_config));
     let mut raw_std = resume_state
         .as_ref()
         .map(|state| state.raw_std)
@@ -3205,6 +3205,73 @@ fn message_mix_params_from_raw(
     }
 }
 
+fn initial_message_mix_raw_mean(config: &MessageMixCemTrainingConfig) -> [f64; 6] {
+    let fresh_negative = point_near_high(config.fresh_negative_min, config.fresh_negative_max);
+    let fresh_positive = point_near_high(config.fresh_positive_min, config.fresh_positive_max);
+    let fresh_p_positive =
+        point_near_high(config.fresh_probability_min, config.fresh_probability_max);
+    let previous_negative =
+        point_near_high(config.previous_negative_min, config.previous_negative_max);
+    let previous_positive =
+        point_near_low(config.previous_positive_min, config.previous_positive_max);
+    let previous_p_positive = midpoint(
+        config.previous_probability_min,
+        config.previous_probability_max,
+    );
+    [
+        raw_from_bounded(
+            fresh_negative,
+            config.fresh_negative_min,
+            config.fresh_negative_max,
+        ),
+        raw_from_bounded(
+            fresh_positive,
+            config.fresh_positive_min,
+            config.fresh_positive_max,
+        ),
+        raw_from_bounded(
+            fresh_p_positive,
+            config.fresh_probability_min,
+            config.fresh_probability_max,
+        ),
+        raw_from_bounded(
+            previous_negative,
+            config.previous_negative_min,
+            config.previous_negative_max,
+        ),
+        raw_from_bounded(
+            previous_positive,
+            config.previous_positive_min,
+            config.previous_positive_max,
+        ),
+        raw_from_bounded(
+            previous_p_positive,
+            config.previous_probability_min,
+            config.previous_probability_max,
+        ),
+    ]
+}
+
+fn point_near_low(low: f64, high: f64) -> f64 {
+    low + 1.0e-3 * (high - low)
+}
+
+fn point_near_high(low: f64, high: f64) -> f64 {
+    high - 1.0e-3 * (high - low)
+}
+
+fn midpoint(low: f64, high: f64) -> f64 {
+    low + 0.5 * (high - low)
+}
+
+fn raw_from_bounded(value: f64, low: f64, high: f64) -> f64 {
+    if high <= low {
+        return 0.0;
+    }
+    let fraction = ((value - low) / (high - low)).clamp(1.0e-12, 1.0 - 1.0e-12);
+    (fraction / (1.0 - fraction)).ln()
+}
+
 fn bounded_sigmoid(raw: f64, low: f64, high: f64) -> f64 {
     if high <= low {
         return low;
@@ -3256,6 +3323,18 @@ mod tests {
         assert!(params.previous_negative > -1.0 && params.previous_negative < 0.0);
         assert!(params.previous_positive > 0.0 && params.previous_positive < 1.0);
         assert!(params.previous_p_positive > 0.001 && params.previous_p_positive < 0.999);
+    }
+
+    #[test]
+    fn message_mix_initial_raw_mean_starts_near_identity_update() {
+        let config = MessageMixCemTrainingConfig::default();
+        let params = message_mix_params_from_raw(initial_message_mix_raw_mean(&config), &config);
+        assert!(params.fresh_negative > -0.002 && params.fresh_negative <= 0.0);
+        assert!(params.fresh_positive >= 0.998 && params.fresh_positive < 1.0);
+        assert!(params.fresh_p_positive >= 0.997 && params.fresh_p_positive < 0.999);
+        assert!(params.previous_negative > -0.002 && params.previous_negative <= 0.0);
+        assert!(params.previous_positive > 0.0 && params.previous_positive <= 0.002);
+        assert!(params.previous_p_positive > 0.49 && params.previous_p_positive < 0.51);
     }
 
     #[test]
