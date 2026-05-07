@@ -40,6 +40,8 @@ fn build_min_sum_config(
         c_damp,
         explicit_c_damp_messages: explicit_c_damp_messages
             .map(|values| unsafe { values.as_array() }.to_owned()),
+        explicit_message_mix_fresh_coefficients: None,
+        explicit_message_mix_previous_coefficients: None,
         explicit_edge_message_weights: explicit_edge_message_weights
             .map(|values| unsafe { values.as_array() }.to_owned()),
         gamma0,
@@ -218,10 +220,7 @@ impl MinSumBPDecoderTraceF64 {
         self.inner_decoder.initialize_decoder();
     }
 
-    pub fn set_memory_strengths(
-        &mut self,
-        memory_strengths: PyReadonlyArray1<'_, f64>,
-    ) {
+    pub fn set_memory_strengths(&mut self, memory_strengths: PyReadonlyArray1<'_, f64>) {
         self.inner_decoder
             .set_memory_strengths_f64(memory_strengths.as_array().to_owned());
     }
@@ -238,6 +237,22 @@ impl MinSumBPDecoderTraceF64 {
         self.inner_decoder.clear_explicit_c_damp_messages();
     }
 
+    pub fn set_explicit_message_mix_coefficients(
+        &mut self,
+        fresh_coefficients: PyReadonlyArray1<'_, f64>,
+        previous_coefficients: PyReadonlyArray1<'_, f64>,
+    ) {
+        self.inner_decoder
+            .set_explicit_message_mix_coefficients_f64(
+                fresh_coefficients.as_array().to_owned(),
+                previous_coefficients.as_array().to_owned(),
+            );
+    }
+
+    pub fn clear_explicit_message_mix_coefficients(&mut self) {
+        self.inner_decoder.clear_explicit_message_mix_coefficients();
+    }
+
     pub fn set_explicit_edge_message_weights(
         &mut self,
         explicit_edge_message_weights: PyReadonlyArray1<'_, f64>,
@@ -251,18 +266,12 @@ impl MinSumBPDecoderTraceF64 {
         self.inner_decoder.clear_explicit_edge_message_weights();
     }
 
-    pub fn set_log_prior_ratios(
-        &mut self,
-        log_prior_ratios: PyReadonlyArray1<'_, f64>,
-    ) {
+    pub fn set_log_prior_ratios(&mut self, log_prior_ratios: PyReadonlyArray1<'_, f64>) {
         self.inner_decoder
             .set_log_prior_ratio_f64(log_prior_ratios.as_array().to_owned());
     }
 
-    pub fn snapshot(
-        &mut self,
-        detectors: PyReadonlyArray1<'_, Bit>,
-    ) -> DecodeResult {
+    pub fn snapshot(&mut self, detectors: PyReadonlyArray1<'_, Bit>) -> DecodeResult {
         let decoded_detectors = self.inner_decoder.compute_decoded_detectors();
         let success = self
             .inner_decoder
@@ -274,19 +283,13 @@ impl MinSumBPDecoderTraceF64 {
         ))
     }
 
-    pub fn run_iteration(
-        &mut self,
-        detectors: PyReadonlyArray1<'_, Bit>,
-    ) -> DecodeResult {
+    pub fn run_iteration(&mut self, detectors: PyReadonlyArray1<'_, Bit>) -> DecodeResult {
         self.inner_decoder.run_iteration(detectors.as_array());
         self.inner_decoder.current_iteration += 1;
         self.snapshot(detectors)
     }
 
-    pub fn decode_detailed(
-        &mut self,
-        detectors: PyReadonlyArray1<'_, Bit>,
-    ) -> DecodeResult {
+    pub fn decode_detailed(&mut self, detectors: PyReadonlyArray1<'_, Bit>) -> DecodeResult {
         DecodeResult::new(self.inner_decoder.decode_detailed(detectors.as_array()))
     }
 

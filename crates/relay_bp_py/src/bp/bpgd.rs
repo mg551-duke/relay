@@ -72,7 +72,7 @@ impl BPGDDecoderF64 {
         random_decimation_candidates: usize,
         random_seed: u64,
         fallback_kind: String,
-        fallback_gamma0: f64,
+        fallback_gamma0: Option<f64>,
         fallback_pre_iter: usize,
         fallback_num_sets: usize,
         fallback_set_max_iter: usize,
@@ -110,6 +110,7 @@ impl BPGDDecoderF64 {
                     explicit_c_damp_messages: fallback_explicit_c_damp_messages
                         .map(|messages| unsafe { messages.as_array() }.to_owned()),
                     c_damp_dist_interval: fallback_c_damp_dist_interval,
+                    message_mix_bernoulli: None,
                     relay_posteriors: fallback_relay_posteriors,
                     stopping_criterion,
                     logging: fallback_logging,
@@ -117,7 +118,7 @@ impl BPGDDecoderF64 {
                 };
                 BPGDFallbackConfig::Relay {
                     relay_config: Arc::new(relay_config),
-                    gamma0: Some(fallback_gamma0),
+                    gamma0: fallback_gamma0,
                 }
             }
             _ => {

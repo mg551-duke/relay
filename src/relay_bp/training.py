@@ -13,14 +13,16 @@ from __future__ import annotations
 
 __all__ = [
     "train_relayed_bpgd_bernoulli_memory",
+    "train_relayed_bpgd_bernoulli_message_mix",
     "train_relayed_bpgd_static_continuous_memory",
     "train_relayed_bpgd_static_discrete_memory",
 ]
 
 from ._relay_bp import _training  # pylint: disable=E0611
 
-train_relayed_bpgd_bernoulli_memory = (
-    _training.train_relayed_bpgd_bernoulli_memory_py
+train_relayed_bpgd_bernoulli_memory = _training.train_relayed_bpgd_bernoulli_memory_py
+train_relayed_bpgd_bernoulli_message_mix = (
+    _training.train_relayed_bpgd_bernoulli_message_mix_py
 )
 train_relayed_bpgd_static_discrete_memory = (
     _training.train_relayed_bpgd_static_discrete_memory_py

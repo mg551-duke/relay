@@ -98,9 +98,8 @@ DEFAULT_DECODER_SEQUENCE = [
 ]
 STATIC_DISCRETE_DECODER_NAME = "relay-bp5-r601-static-discrete-memory"
 STATIC_CONTINUOUS_DECODER_NAME = "relay-bp5-r601-static-continuous-memory"
-STATIC_DISCRETE_TOPK_DAMP_DECODER_NAME = (
-    "relay-bp5-r601-static-discrete-top10-damp0p9"
-)
+STATIC_DISCRETE_TOPK_DAMP_DECODER_NAME = "relay-bp5-r601-static-discrete-top10-damp0p9"
+MESSAGE_MIX_NO_GAMMA_DECODER_NAME = "relay-bp5-r601-message-mix-no-gamma"
 DEFAULT_DECODER_INDICES: list[int] | None = None
 DEFAULT_MAX_BATCH_SIZE = 64
 DEFAULT_STATIC_DISCRETE_ASSIGNMENT_BANK_TOP_K = 10
@@ -152,7 +151,9 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def load_static_gammas(path: Path | None) -> tuple[np.ndarray | None, dict[str, Any] | None]:
+def load_static_gammas(
+    path: Path | None,
+) -> tuple[np.ndarray | None, dict[str, Any] | None]:
     if path is None:
         return None, None
     resolved = path.resolve()
@@ -164,13 +165,87 @@ def load_static_gammas(path: Path | None) -> tuple[np.ndarray | None, dict[str, 
             f"Static gamma artifact must be 1D or shape (1, n_variables); got {gammas.shape} from {resolved}."
         )
     if not np.all(np.isfinite(gammas)):
-        raise ValueError(f"Static gamma artifact contains non-finite values: {resolved}")
+        raise ValueError(
+            f"Static gamma artifact contains non-finite values: {resolved}"
+        )
     metadata = {
         "path": str(resolved),
         "shape": [int(dim) for dim in gammas.shape],
         "sha256": file_sha256(resolved),
     }
     return gammas, metadata
+
+
+def load_message_mix_best_params(
+    path: Path | None,
+) -> tuple[
+    tuple[float, float, float, float, float, float] | None, dict[str, Any] | None
+]:
+    if path is None:
+        return None, None
+    resolved = path.resolve()
+    if not resolved.exists():
+        raise FileNotFoundError(f"Message-mix params path does not exist: {resolved}")
+    best_path = resolve_message_mix_best_params_path(resolved)
+    payload = load_json_if_dict(best_path)
+    if payload is None:
+        raise ValueError(
+            f"Expected JSON object in message-mix params file: {best_path}"
+        )
+    params_payload = payload.get("params") if "params" in payload else payload
+    if not isinstance(params_payload, dict):
+        raise ValueError(f"Message-mix params JSON missing params object: {best_path}")
+    names = [
+        "fresh_negative",
+        "fresh_positive",
+        "fresh_p_positive",
+        "previous_negative",
+        "previous_positive",
+        "previous_p_positive",
+    ]
+    values = tuple(float(params_payload[name]) for name in names)
+    if not all(np.isfinite(values)):
+        raise ValueError(f"Message-mix params contain non-finite values: {best_path}")
+    metadata = {
+        "path": str(best_path),
+        "source": str(resolved),
+        "sha256": file_sha256(best_path),
+        "message_mix_bernoulli": list(values),
+    }
+    metrics = payload.get("metrics")
+    if isinstance(metrics, dict):
+        metadata["metrics"] = metrics
+    return values, metadata
+
+
+def resolve_message_mix_best_params_path(path: Path) -> Path:
+    if path.is_file():
+        return path
+    direct = path / "best_params.json"
+    if direct.exists():
+        return direct
+    seed_candidates = []
+    for seed_dir in path.iterdir():
+        candidate = seed_dir / "best_params.json"
+        if (
+            seed_dir.is_dir()
+            and seed_dir.name.startswith("seed_")
+            and candidate.exists()
+        ):
+            payload = load_json_if_dict(candidate)
+            metrics = payload.get("metrics") if isinstance(payload, dict) else None
+            rank_key = (
+                metrics_rank_key(metrics)
+                if isinstance(metrics, dict)
+                else (float("inf"), float("inf"), 0.0)
+            )
+            seed_candidates.append((rank_key, seed_dir_sort_key(seed_dir), candidate))
+    if not seed_candidates:
+        raise FileNotFoundError(
+            f"No best_params.json found under message-mix training output base: {path}"
+        )
+    seed_candidates.sort(key=lambda item: (item[0], item[1]))
+    return seed_candidates[0][2]
 
 
 def metrics_rank_key(metrics: dict[str, Any]) -> tuple[float, float, float]:
@@ -272,11 +347,7 @@ def load_static_discrete_assignment_bank(
         "candidate_count": int(len(candidates)),
         "skipped": skipped,
         "selected_assignments": [
-            {
-                key: value
-                for key, value in candidate.items()
-                if key != "gammas"
-            }
+            {key: value for key, value in candidate.items() if key != "gammas"}
             for candidate in selected
         ],
     }
@@ -309,7 +380,11 @@ def load_static_discrete_metrics(
     if validation_payload is not None:
         validation_metrics = validation_payload.get("discrete")
         if isinstance(validation_metrics, dict):
-            return validation_metrics, "validation_metrics.json:discrete", validation_path
+            return (
+                validation_metrics,
+                "validation_metrics.json:discrete",
+                validation_path,
+            )
 
     params_path = seed_dir / "discrete_best_params.json"
     params_payload = load_json_if_dict(params_path)
@@ -547,6 +622,9 @@ def build_custom_decoders(
     static_discrete_gammas: np.ndarray | None = None,
     static_continuous_gammas: np.ndarray | None = None,
     static_discrete_assignment_bank: np.ndarray | None = None,
+    message_mix_bernoulli: (
+        tuple[float, float, float, float, float, float] | None
+    ) = None,
 ) -> dict[str, Sampler]:
     common = dict(
         alpha=RELAY_ALPHA,
@@ -639,6 +717,16 @@ def build_custom_decoders(
                 c_damp=RELAY_FIXED_DAMPING,
                 seed=RELAY_BASE_SEED + 8,
                 decoder_label=STATIC_DISCRETE_TOPK_DAMP_DECODER_NAME,
+            )
+        )
+    if message_mix_bernoulli is not None:
+        decoders[MESSAGE_MIX_NO_GAMMA_DECODER_NAME] = RelayBPIterationSampler(
+            decoder=SinterDecoder_RelayBP(
+                **common,
+                gamma0=None,
+                message_mix_bernoulli=message_mix_bernoulli,
+                seed=RELAY_BASE_SEED + 9,
+                decoder_label=MESSAGE_MIX_NO_GAMMA_DECODER_NAME,
             )
         )
     return decoders
@@ -845,6 +933,7 @@ def build_setup_dict(
     static_discrete_gammas_metadata: dict[str, Any] | None,
     static_continuous_gammas_metadata: dict[str, Any] | None,
     static_discrete_assignment_bank_metadata: dict[str, Any] | None,
+    message_mix_metadata: dict[str, Any] | None,
 ) -> dict[str, Any]:
     return {
         "repo_root": str(repo_root),
@@ -870,6 +959,7 @@ def build_setup_dict(
         "static_discrete_gammas": static_discrete_gammas_metadata,
         "static_continuous_gammas": static_continuous_gammas_metadata,
         "static_discrete_assignment_bank": static_discrete_assignment_bank_metadata,
+        "message_mix": message_mix_metadata,
         "decoder_sequence": list(decoder_sequence),
         "num_workers": int(num_workers),
         "max_batch_size": int(max_batch_size),
@@ -927,6 +1017,7 @@ def validate_resume_setup(setup_json_path: Path, current_setup: dict[str, Any]) 
         "static_discrete_gammas",
         "static_continuous_gammas",
         "static_discrete_assignment_bank",
+        "message_mix",
     ]:
         if existing_setup.get(field) != current_setup.get(field):
             mismatches.append(field)
@@ -1044,6 +1135,15 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_STATIC_DISCRETE_ASSIGNMENT_BANK_TOP_K,
         help="Number of ranked static discrete assignments to stack for the rotating bank.",
     )
+    parser.add_argument(
+        "--message-mix-best-params-path",
+        type=Path,
+        default=None,
+        help=(
+            "Optional best_params.json or training output base to append the "
+            f"{MESSAGE_MIX_NO_GAMMA_DECODER_NAME} comparison decoder."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -1092,11 +1192,15 @@ def main() -> None:
         args.static_discrete_assignment_bank_base,
         top_k=args.static_discrete_assignment_bank_top_k,
     )
+    message_mix_bernoulli, message_mix_metadata = load_message_mix_best_params(
+        args.message_mix_best_params_path
+    )
 
     custom_decoders = build_custom_decoders(
         static_discrete_gammas=static_discrete_gammas,
         static_continuous_gammas=static_continuous_gammas,
         static_discrete_assignment_bank=static_discrete_assignment_bank,
+        message_mix_bernoulli=message_mix_bernoulli,
     )
     default_decoder_sequence = list(DEFAULT_DECODER_SEQUENCE)
     if static_discrete_gammas is not None:
@@ -1105,6 +1209,8 @@ def main() -> None:
         default_decoder_sequence.append(STATIC_CONTINUOUS_DECODER_NAME)
     if static_discrete_assignment_bank is not None:
         default_decoder_sequence.append(STATIC_DISCRETE_TOPK_DAMP_DECODER_NAME)
+    if message_mix_bernoulli is not None:
+        default_decoder_sequence.append(MESSAGE_MIX_NO_GAMMA_DECODER_NAME)
     decoder_sequence = args.decoders or default_decoder_sequence
     unknown = [name for name in decoder_sequence if name not in custom_decoders]
     if unknown:
@@ -1137,6 +1243,7 @@ def main() -> None:
         static_discrete_gammas_metadata=static_discrete_gammas_metadata,
         static_continuous_gammas_metadata=static_continuous_gammas_metadata,
         static_discrete_assignment_bank_metadata=static_discrete_assignment_bank_metadata,
+        message_mix_metadata=message_mix_metadata,
     )
     validate_resume_setup(setup_json, setup)
     setup_json.write_text(json.dumps(setup, indent=2, sort_keys=True), encoding="utf-8")
@@ -1156,6 +1263,7 @@ def main() -> None:
     print("static_discrete_gammas =", static_discrete_gammas_metadata)
     print("static_continuous_gammas =", static_continuous_gammas_metadata)
     print("static_discrete_assignment_bank =", static_discrete_assignment_bank_metadata)
+    print("message_mix =", message_mix_metadata)
     print("decoders =", decoder_sequence)
     if args.decoder_indices is None:
         print("selected_decoder_indices = all")

@@ -8,11 +8,14 @@ use relay_bp::bp::relay::StoppingCriterion;
 use relay_bp::decoder::Bit;
 use relay_bp::training::{
     train_relayed_bpgd_bernoulli_memory_with_progress,
+    train_relayed_bpgd_bernoulli_message_mix_with_progress,
     train_relayed_bpgd_static_continuous_memory_with_progress,
     train_relayed_bpgd_static_discrete_memory_with_progress, BernoulliCandidateResult,
     BernoulliCemTrainingConfig, BernoulliEvaluationMetrics, BernoulliGammaParams,
     BernoulliGenerationRecord, BernoulliTrainingProblem, BernoulliTrainingProgress,
-    BernoulliTrainingResumeState, RelayedBpgdTrainingDecoderConfig,
+    BernoulliTrainingResumeState, MessageMixBernoulliParams, MessageMixCandidateResult,
+    MessageMixCemTrainingConfig, MessageMixGenerationRecord, MessageMixTrainingProgress,
+    MessageMixTrainingResumeState, RelayedBpgdTrainingDecoderConfig,
     StaticContinuousCandidateResult, StaticContinuousGenerationRecord,
     StaticContinuousMemoryTrainingConfig, StaticContinuousTrainingProgress,
     StaticContinuousTrainingResumeState, StaticDiscreteCandidateResult,
@@ -198,6 +201,207 @@ pub fn train_relayed_bpgd_bernoulli_memory_py<'py>(
     payload.set_item(
         "generation_records",
         generation_records_to_list(py, &result.generation_records)?,
+    )?;
+    payload.set_item("final_raw_mean", result.final_raw_mean.to_vec())?;
+    payload.set_item("final_raw_std", result.final_raw_std.to_vec())?;
+    Ok(payload)
+}
+
+#[pyfunction]
+#[pyo3(signature = (
+    check_matrix,
+    observable_matrix,
+    error_priors,
+    train_detectors,
+    train_observables,
+    validation_detectors,
+    validation_observables,
+    alpha=None,
+    alpha_iteration_scaling_factor=1.0,
+    gamma0=None,
+    random_decimation_candidates=1,
+    pre_iter=80,
+    num_sets=300,
+    set_max_iter=60,
+    relay_posteriors=true,
+    stop_nconv=5,
+    stopping_criterion="nconv".to_string(),
+    decimation_pre_iter=0,
+    initial_decimation_percentage=0.0,
+    r_low=0,
+    t_low=3,
+    r_high=0,
+    t_high=5,
+    fresh_negative_min=-1.0,
+    fresh_negative_max=0.0,
+    fresh_positive_min=0.0,
+    fresh_positive_max=1.0,
+    fresh_probability_min=0.001,
+    fresh_probability_max=0.999,
+    previous_negative_min=-1.0,
+    previous_negative_max=0.0,
+    previous_positive_min=0.0,
+    previous_positive_max=1.0,
+    previous_probability_min=0.001,
+    previous_probability_max=0.999,
+    candidate_count=64,
+    elite_count=8,
+    generations=20,
+    distribution_repeats=1,
+    local_refinement_steps=3,
+    initial_std=1.0,
+    std_floor=0.05,
+    smoothing=0.7,
+    train_max_logical_failures=None,
+    validation_max_logical_failures=None,
+    seed=0,
+    resume_state=None,
+    progress_callback=None
+))]
+#[allow(clippy::too_many_arguments)]
+pub fn train_relayed_bpgd_bernoulli_message_mix_py<'py>(
+    py: Python<'py>,
+    check_matrix: &Bound<'_, PyAny>,
+    observable_matrix: &Bound<'_, PyAny>,
+    error_priors: PyReadonlyArray1<'_, f64>,
+    train_detectors: PyReadonlyArray2<'_, Bit>,
+    train_observables: PyReadonlyArray2<'_, Bit>,
+    validation_detectors: PyReadonlyArray2<'_, Bit>,
+    validation_observables: PyReadonlyArray2<'_, Bit>,
+    alpha: Option<f64>,
+    alpha_iteration_scaling_factor: f64,
+    gamma0: Option<f64>,
+    random_decimation_candidates: usize,
+    pre_iter: usize,
+    num_sets: usize,
+    set_max_iter: usize,
+    relay_posteriors: bool,
+    stop_nconv: usize,
+    stopping_criterion: String,
+    decimation_pre_iter: usize,
+    initial_decimation_percentage: f64,
+    r_low: usize,
+    t_low: usize,
+    r_high: usize,
+    t_high: usize,
+    fresh_negative_min: f64,
+    fresh_negative_max: f64,
+    fresh_positive_min: f64,
+    fresh_positive_max: f64,
+    fresh_probability_min: f64,
+    fresh_probability_max: f64,
+    previous_negative_min: f64,
+    previous_negative_max: f64,
+    previous_positive_min: f64,
+    previous_positive_max: f64,
+    previous_probability_min: f64,
+    previous_probability_max: f64,
+    candidate_count: usize,
+    elite_count: usize,
+    generations: usize,
+    distribution_repeats: usize,
+    local_refinement_steps: usize,
+    initial_std: f64,
+    std_floor: f64,
+    smoothing: f64,
+    train_max_logical_failures: Option<usize>,
+    validation_max_logical_failures: Option<usize>,
+    seed: u64,
+    resume_state: Option<&Bound<'_, PyDict>>,
+    progress_callback: Option<Py<PyAny>>,
+) -> PyResult<Bound<'py, PyDict>> {
+    let problem = BernoulliTrainingProblem {
+        check_matrix: Arc::new(get_sprs_bit_matrix_from_python(py, check_matrix)?),
+        observable_matrix: Arc::new(get_sprs_bit_matrix_from_python(py, observable_matrix)?),
+        error_priors: error_priors.as_array().to_owned(),
+        train_detectors: train_detectors.as_array().to_owned(),
+        train_observables: train_observables.as_array().to_owned(),
+        validation_detectors: validation_detectors.as_array().to_owned(),
+        validation_observables: validation_observables.as_array().to_owned(),
+    };
+    let decoder_config = RelayedBpgdTrainingDecoderConfig {
+        alpha,
+        alpha_iteration_scaling_factor,
+        gamma0,
+        c_damp: None,
+        random_decimation_candidates,
+        pre_iter,
+        num_sets,
+        set_max_iter,
+        relay_posteriors,
+        stopping_criterion: parse_stopping_criterion(&stopping_criterion, stop_nconv),
+        stop_nconv,
+        decimation_pre_iter,
+        initial_decimation_percentage,
+        r_low,
+        t_low,
+        r_high,
+        t_high,
+    };
+    let training_config = MessageMixCemTrainingConfig {
+        fresh_negative_min,
+        fresh_negative_max,
+        fresh_positive_min,
+        fresh_positive_max,
+        fresh_probability_min,
+        fresh_probability_max,
+        previous_negative_min,
+        previous_negative_max,
+        previous_positive_min,
+        previous_positive_max,
+        previous_probability_min,
+        previous_probability_max,
+        candidate_count,
+        elite_count,
+        generations,
+        distribution_repeats,
+        local_refinement_steps,
+        initial_std,
+        std_floor,
+        smoothing,
+        train_max_logical_failures,
+        validation_max_logical_failures,
+        seed,
+    };
+    let resume_state = match resume_state {
+        Some(state) => Some(message_mix_resume_state_from_dict(state)?),
+        None => None,
+    };
+    let mut callback_holder = progress_callback.map(|callback| {
+        move |progress: &MessageMixTrainingProgress| -> Result<(), String> {
+            Python::with_gil(|py| {
+                let payload =
+                    message_mix_progress_to_dict(py, progress).map_err(|err| err.to_string())?;
+                callback
+                    .call1(py, (payload,))
+                    .map_err(|err| err.to_string())?;
+                Ok(())
+            })
+        }
+    });
+    let callback_ref = callback_holder.as_mut().map(|callback| {
+        callback as &mut dyn FnMut(&MessageMixTrainingProgress) -> Result<(), String>
+    });
+    let result = train_relayed_bpgd_bernoulli_message_mix_with_progress(
+        problem,
+        decoder_config,
+        training_config,
+        resume_state,
+        callback_ref,
+    )
+    .map_err(pyo3::exceptions::PyValueError::new_err)?;
+    let payload = PyDict::new(py);
+    payload.set_item(
+        "best_candidate",
+        message_mix_candidate_to_dict(py, &result.best_candidate)?,
+    )?;
+    payload.set_item(
+        "validation_metrics",
+        metrics_to_dict(py, &result.validation_metrics)?,
+    )?;
+    payload.set_item(
+        "generation_records",
+        message_mix_generation_records_to_list(py, &result.generation_records)?,
     )?;
     payload.set_item("final_raw_mean", result.final_raw_mean.to_vec())?;
     payload.set_item("final_raw_std", result.final_raw_std.to_vec())?;
@@ -643,6 +847,18 @@ fn extract_triplet(value: &Bound<'_, PyAny>, label: &str) -> PyResult<[f64; 3]> 
     Ok([values[0], values[1], values[2]])
 }
 
+fn extract_sextet(value: &Bound<'_, PyAny>, label: &str) -> PyResult<[f64; 6]> {
+    let values: Vec<f64> = value.extract()?;
+    if values.len() != 6 {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "{label} must contain exactly six values"
+        )));
+    }
+    Ok([
+        values[0], values[1], values[2], values[3], values[4], values[5],
+    ])
+}
+
 fn candidate_from_any(value: &Bound<'_, PyAny>) -> PyResult<BernoulliCandidateResult> {
     let raw_params = extract_triplet(&value.get_item("raw_params")?, "raw_params")?;
     let params_any = value.get_item("params")?;
@@ -656,6 +872,80 @@ fn candidate_from_any(value: &Bound<'_, PyAny>) -> PyResult<BernoulliCandidateRe
         },
         metrics: metrics_from_any(&metrics_any)?,
     })
+}
+
+fn message_mix_resume_state_from_dict(
+    dict: &Bound<'_, PyDict>,
+) -> PyResult<MessageMixTrainingResumeState> {
+    let completed_generations = required_item(dict, "completed_generations")?.extract()?;
+    let raw_mean = extract_sextet(&required_item(dict, "final_raw_mean")?, "final_raw_mean")?;
+    let raw_std = extract_sextet(&required_item(dict, "final_raw_std")?, "final_raw_std")?;
+    let best_candidate = match dict.get_item("best_candidate")? {
+        Some(item) => Some(message_mix_candidate_from_any(&item)?),
+        None => None,
+    };
+    let generation_records = match dict.get_item("generation_records")? {
+        Some(item) => message_mix_generation_records_from_any(&item)?,
+        None => Vec::new(),
+    };
+    Ok(MessageMixTrainingResumeState {
+        completed_generations,
+        raw_mean,
+        raw_std,
+        best_candidate,
+        generation_records,
+    })
+}
+
+fn message_mix_candidate_from_any(value: &Bound<'_, PyAny>) -> PyResult<MessageMixCandidateResult> {
+    let raw_params = extract_sextet(&value.get_item("raw_params")?, "raw_params")?;
+    let params_any = value.get_item("params")?;
+    let metrics_any = value.get_item("metrics")?;
+    Ok(MessageMixCandidateResult {
+        raw_params,
+        params: MessageMixBernoulliParams {
+            fresh_negative: params_any.get_item("fresh_negative")?.extract()?,
+            fresh_positive: params_any.get_item("fresh_positive")?.extract()?,
+            fresh_p_positive: params_any.get_item("fresh_p_positive")?.extract()?,
+            previous_negative: params_any.get_item("previous_negative")?.extract()?,
+            previous_positive: params_any.get_item("previous_positive")?.extract()?,
+            previous_p_positive: params_any.get_item("previous_p_positive")?.extract()?,
+        },
+        metrics: metrics_from_any(&metrics_any)?,
+    })
+}
+
+fn message_mix_generation_record_from_any(
+    value: &Bound<'_, PyAny>,
+) -> PyResult<MessageMixGenerationRecord> {
+    let raw_mean = extract_sextet(&value.get_item("raw_mean")?, "raw_mean")?;
+    let raw_std = extract_sextet(&value.get_item("raw_std")?, "raw_std")?;
+    let mean_params_any = value.get_item("mean_params")?;
+    Ok(MessageMixGenerationRecord {
+        generation: value.get_item("generation")?.extract()?,
+        raw_mean,
+        raw_std,
+        mean_params: MessageMixBernoulliParams {
+            fresh_negative: mean_params_any.get_item("fresh_negative")?.extract()?,
+            fresh_positive: mean_params_any.get_item("fresh_positive")?.extract()?,
+            fresh_p_positive: mean_params_any.get_item("fresh_p_positive")?.extract()?,
+            previous_negative: mean_params_any.get_item("previous_negative")?.extract()?,
+            previous_positive: mean_params_any.get_item("previous_positive")?.extract()?,
+            previous_p_positive: mean_params_any.get_item("previous_p_positive")?.extract()?,
+        },
+        best_candidate: message_mix_candidate_from_any(&value.get_item("best_candidate")?)?,
+    })
+}
+
+fn message_mix_generation_records_from_any(
+    value: &Bound<'_, PyAny>,
+) -> PyResult<Vec<MessageMixGenerationRecord>> {
+    let list = value.downcast::<PyList>()?;
+    let mut records = Vec::with_capacity(list.len());
+    for item in list.iter() {
+        records.push(message_mix_generation_record_from_any(&item)?);
+    }
+    Ok(records)
 }
 
 fn metrics_from_any(value: &Bound<'_, PyAny>) -> PyResult<BernoulliEvaluationMetrics> {
@@ -894,6 +1184,20 @@ fn params_to_dict<'py>(
     Ok(dict)
 }
 
+fn message_mix_params_to_dict<'py>(
+    py: Python<'py>,
+    params: &MessageMixBernoulliParams,
+) -> PyResult<Bound<'py, PyDict>> {
+    let dict = PyDict::new(py);
+    dict.set_item("fresh_negative", params.fresh_negative)?;
+    dict.set_item("fresh_positive", params.fresh_positive)?;
+    dict.set_item("fresh_p_positive", params.fresh_p_positive)?;
+    dict.set_item("previous_negative", params.previous_negative)?;
+    dict.set_item("previous_positive", params.previous_positive)?;
+    dict.set_item("previous_p_positive", params.previous_p_positive)?;
+    Ok(dict)
+}
+
 fn metrics_to_dict<'py>(
     py: Python<'py>,
     metrics: &BernoulliEvaluationMetrics,
@@ -911,6 +1215,17 @@ fn metrics_to_dict<'py>(
     Ok(dict)
 }
 
+fn message_mix_candidate_to_dict<'py>(
+    py: Python<'py>,
+    candidate: &MessageMixCandidateResult,
+) -> PyResult<Bound<'py, PyDict>> {
+    let dict = PyDict::new(py);
+    dict.set_item("raw_params", candidate.raw_params.to_vec())?;
+    dict.set_item("params", message_mix_params_to_dict(py, &candidate.params)?)?;
+    dict.set_item("metrics", metrics_to_dict(py, &candidate.metrics)?)?;
+    Ok(dict)
+}
+
 fn candidate_to_dict<'py>(
     py: Python<'py>,
     candidate: &BernoulliCandidateResult,
@@ -919,6 +1234,25 @@ fn candidate_to_dict<'py>(
     dict.set_item("raw_params", candidate.raw_params.to_vec())?;
     dict.set_item("params", params_to_dict(py, &candidate.params)?)?;
     dict.set_item("metrics", metrics_to_dict(py, &candidate.metrics)?)?;
+    Ok(dict)
+}
+
+fn message_mix_generation_record_to_dict<'py>(
+    py: Python<'py>,
+    record: &MessageMixGenerationRecord,
+) -> PyResult<Bound<'py, PyDict>> {
+    let dict = PyDict::new(py);
+    dict.set_item("generation", record.generation)?;
+    dict.set_item("raw_mean", record.raw_mean.to_vec())?;
+    dict.set_item("raw_std", record.raw_std.to_vec())?;
+    dict.set_item(
+        "mean_params",
+        message_mix_params_to_dict(py, &record.mean_params)?,
+    )?;
+    dict.set_item(
+        "best_candidate",
+        message_mix_candidate_to_dict(py, &record.best_candidate)?,
+    )?;
     Ok(dict)
 }
 
@@ -938,6 +1272,17 @@ fn generation_record_to_dict<'py>(
     Ok(dict)
 }
 
+fn message_mix_generation_records_to_list<'py>(
+    py: Python<'py>,
+    records: &[MessageMixGenerationRecord],
+) -> PyResult<Bound<'py, PyList>> {
+    let list = PyList::empty(py);
+    for record in records {
+        list.append(message_mix_generation_record_to_dict(py, record)?)?;
+    }
+    Ok(list)
+}
+
 fn generation_records_to_list<'py>(
     py: Python<'py>,
     records: &[BernoulliGenerationRecord],
@@ -947,6 +1292,29 @@ fn generation_records_to_list<'py>(
         list.append(generation_record_to_dict(py, record)?)?;
     }
     Ok(list)
+}
+
+fn message_mix_progress_to_dict<'py>(
+    py: Python<'py>,
+    progress: &MessageMixTrainingProgress,
+) -> PyResult<Bound<'py, PyDict>> {
+    let dict = PyDict::new(py);
+    dict.set_item("completed_generations", progress.completed_generations)?;
+    dict.set_item(
+        "generation_record",
+        message_mix_generation_record_to_dict(py, &progress.generation_record)?,
+    )?;
+    dict.set_item(
+        "best_candidate",
+        message_mix_candidate_to_dict(py, &progress.best_candidate)?,
+    )?;
+    dict.set_item(
+        "generation_records",
+        message_mix_generation_records_to_list(py, &progress.generation_records)?,
+    )?;
+    dict.set_item("final_raw_mean", progress.final_raw_mean.to_vec())?;
+    dict.set_item("final_raw_std", progress.final_raw_std.to_vec())?;
+    Ok(dict)
 }
 
 fn progress_to_dict<'py>(
@@ -1098,6 +1466,10 @@ fn static_continuous_progress_to_dict<'py>(
 #[pymodule]
 pub fn _training<'py>(_py: Python<'py>, m: &Bound<'py, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(train_relayed_bpgd_bernoulli_memory_py, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        train_relayed_bpgd_bernoulli_message_mix_py,
+        m
+    )?)?;
     m.add_function(wrap_pyfunction!(
         train_relayed_bpgd_static_discrete_memory_py,
         m

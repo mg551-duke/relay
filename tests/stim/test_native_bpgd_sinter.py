@@ -246,6 +246,34 @@ def test_decoder_from_spec_supports_relay_scalar_damping():
     assert decoder.seed == 9
 
 
+def test_decoder_from_spec_supports_relay_message_mix():
+    message_mix = (-0.5, 0.75, 0.6, -0.25, 0.1, 0.2)
+    decoder = decoder_from_spec(
+        {
+            "name": "relay_message_mix",
+            "stages": [
+                {
+                    "kind": "relay-bp",
+                    "params": {
+                        "gamma0": None,
+                        "pre_iter": 80,
+                        "num_sets": 30,
+                        "set_max_iter": 60,
+                        "message_mix_bernoulli": list(message_mix),
+                        "seed": 9,
+                    },
+                }
+            ],
+        }
+    )
+
+    assert decoder.gamma0 is None
+    assert decoder.message_mix_bernoulli == message_mix
+    assert decoder.c_damp is None
+    assert decoder.c_damp_dist_interval is None
+    assert decoder.seed == 9
+
+
 def test_decoder_from_spec_supports_relayed_bpgd_interval_damping():
     decoder = decoder_from_spec(
         {
@@ -267,6 +295,34 @@ def test_decoder_from_spec_supports_relayed_bpgd_interval_damping():
     )
 
     assert decoder.c_damp_dist_interval == (0.5, 1.0)
+    assert decoder.seed == 9
+
+
+def test_decoder_from_spec_supports_relayed_bpgd_message_mix():
+    message_mix = (-0.5, 0.75, 0.6, -0.25, 0.1, 0.2)
+    decoder = decoder_from_spec(
+        {
+            "name": "relay_bpgd_message_mix",
+            "stages": [
+                {
+                    "kind": "Relayed_BPGD",
+                    "params": {
+                        "gamma0": None,
+                        "pre_iter": 80,
+                        "num_sets": 30,
+                        "set_max_iter": 60,
+                        "message_mix_bernoulli": list(message_mix),
+                        "seed": 9,
+                    },
+                }
+            ],
+        }
+    )
+
+    assert decoder.gamma0 is None
+    assert decoder.message_mix_bernoulli == message_mix
+    assert decoder.c_damp is None
+    assert decoder.c_damp_dist_interval is None
     assert decoder.seed == 9
 
 

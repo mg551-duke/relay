@@ -123,3 +123,55 @@ def test_decode_detailed_with_explicit_edge_damping_messages(repetition_code_con
     assert result.damping_mode == "edge_message"
     assert result.damping_min == pytest.approx(0.75)
     assert result.damping_max == pytest.approx(0.75)
+
+
+def test_message_mix_bernoulli_is_applied_like_fresh_scaling(repetition_code_config):
+    repetition_code_config.pop("max_iter", None)
+    detectors = np.array([1, 1], dtype=np.uint8)
+
+    mixed = relay_bp.RelayDecoderF64(
+        **repetition_code_config,
+        pre_iter=1,
+        num_sets=0,
+        set_max_iter=1,
+        gamma0=None,
+        message_mix_bernoulli=(-1.0, 0.5, 1.0, -1.0, 0.0, 1.0),
+        stopping_criterion="pre_iter",
+        seed=11,
+    ).decode_detailed(detectors)
+    reference_config = dict(repetition_code_config)
+    reference_config["alpha"] = 0.5
+    reference = relay_bp.RelayDecoderF64(
+        **reference_config,
+        pre_iter=1,
+        num_sets=0,
+        set_max_iter=1,
+        gamma0=None,
+        stopping_criterion="pre_iter",
+        seed=11,
+    ).decode_detailed(detectors)
+
+    assert mixed.damping_mode == "message_mix"
+    assert mixed.damping_min == pytest.approx(0.0)
+    assert mixed.damping_max == pytest.approx(0.5)
+    np.testing.assert_allclose(mixed.posterior_ratios, reference.posterior_ratios)
+
+
+def test_message_mix_rejects_existing_damping_sources(repetition_code_config):
+    repetition_code_config.pop("max_iter", None)
+    message_mix = (-1.0, 0.5, 1.0, -1.0, 0.0, 1.0)
+
+    with pytest.raises(ValueError, match="message_mix_bernoulli"):
+        relay_bp.RelayDecoderF64(
+            **repetition_code_config,
+            c_damp=0.9,
+            message_mix_bernoulli=message_mix,
+        )
+
+    explicit = np.full((2, repetition_code_config["check_matrix"].nnz), 0.75)
+    with pytest.raises(ValueError, match="message_mix_bernoulli"):
+        relay_bp.RelayDecoderF64(
+            **repetition_code_config,
+            explicit_c_damp_messages=explicit,
+            message_mix_bernoulli=message_mix,
+        )

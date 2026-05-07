@@ -23,7 +23,7 @@
 use super::min_sum::{MinSumBPDecoder, MinSumDecoderConfig};
 use super::relay::{RelayDecoderConfig, StoppingCriterion};
 use crate::decoder::{
-    Bit, BPGDExtraResult, BPExtraResult, BPStageResult, DecodeResult, Decoder, DecoderRunner,
+    BPExtraResult, BPGDExtraResult, BPStageResult, Bit, DecodeResult, Decoder, DecoderRunner,
     Mod2Mul, SparseBitMatrix,
 };
 use ndarray::{Array1, ArrayView1};
@@ -94,13 +94,27 @@ impl RelayedBPGDDecoder {
             .effective_gamma_sampler()
             .validate()
             .expect("Invalid relay gamma sampler.");
+        if let Some(message_mix) = config.relay_config.message_mix_bernoulli {
+            message_mix
+                .validate()
+                .expect("Invalid relay message-mix sampler.");
+        }
         assert!(
             !(config.c_damp.is_some()
                 && (config.relay_config.explicit_c_damp_messages.is_some()
                     || config.relay_config.c_damp_dist_interval.is_some())),
             "Scalar c_damp cannot be combined with relay explicit_c_damp_messages or c_damp_dist_interval.",
         );
-        if let Some(explicit_c_damp_messages) = config.relay_config.explicit_c_damp_messages.as_ref() {
+        assert!(
+            !(config.relay_config.message_mix_bernoulli.is_some()
+                && (config.c_damp.is_some()
+                    || config.relay_config.explicit_c_damp_messages.is_some()
+                    || config.relay_config.c_damp_dist_interval.is_some())),
+            "message_mix_bernoulli cannot be combined with c_damp, explicit_c_damp_messages, or c_damp_dist_interval.",
+        );
+        if let Some(explicit_c_damp_messages) =
+            config.relay_config.explicit_c_damp_messages.as_ref()
+        {
             let shape = explicit_c_damp_messages.shape();
             assert!(
                 shape[0] == config.relay_config.num_sets + 1,
@@ -133,6 +147,8 @@ impl RelayedBPGDDecoder {
                 alpha_iteration_scaling_factor: config.alpha_iteration_scaling_factor,
                 c_damp: config.c_damp,
                 explicit_c_damp_messages: None,
+                explicit_message_mix_fresh_coefficients: None,
+                explicit_message_mix_previous_coefficients: None,
                 explicit_edge_message_weights: config.explicit_edge_message_weights.clone(),
                 gamma0: config.gamma0,
                 data_scale_value: None,
@@ -166,7 +182,29 @@ impl RelayedBPGDDecoder {
     }
 
     fn apply_stage_edge_damping(&mut self, stage_idx: usize) {
-        if let Some(explicit_c_damp_messages) = self.config.relay_config.explicit_c_damp_messages.as_ref() {
+        if let Some(message_mix) = self.config.relay_config.message_mix_bernoulli {
+            self.bp_decoder.clear_explicit_c_damp_messages();
+            let mut fresh_coefficients = Array1::zeros(self.check_matrix.nnz());
+            let mut previous_coefficients = Array1::zeros(self.check_matrix.nnz());
+            for (fresh, previous) in fresh_coefficients
+                .iter_mut()
+                .zip(previous_coefficients.iter_mut())
+            {
+                let (sampled_fresh, sampled_previous) =
+                    message_mix.sample(&mut self.posterior_update_state.rng_std);
+                *fresh = sampled_fresh;
+                *previous = sampled_previous;
+            }
+            self.bp_decoder.set_explicit_message_mix_coefficients_f64(
+                fresh_coefficients,
+                previous_coefficients,
+            );
+            return;
+        }
+        self.bp_decoder.clear_explicit_message_mix_coefficients();
+        if let Some(explicit_c_damp_messages) =
+            self.config.relay_config.explicit_c_damp_messages.as_ref()
+        {
             let row = explicit_c_damp_messages.row(stage_idx).to_owned();
             self.bp_decoder.set_explicit_c_damp_messages_f64(row);
             return;
@@ -295,7 +333,8 @@ impl RelayedBPGDDecoder {
         if count == 0 {
             return 0;
         }
-        let indices = self.choose_high_confidence_indices(&result.posterior_ratios, fixed_bits, count);
+        let indices =
+            self.choose_high_confidence_indices(&result.posterior_ratios, fixed_bits, count);
         for index in &indices {
             fixed_bits[*index] = Some(result.decoding[*index]);
         }
@@ -371,7 +410,8 @@ impl RelayedBPGDDecoder {
                 break;
             }
         }
-        self.bp_decoder.build_result(success, decoded_detectors, max_iter)
+        self.bp_decoder
+            .build_result(success, decoded_detectors, max_iter)
     }
 
     fn run_leg(&mut self, detectors: ArrayView1<Bit>, leg_budget: usize) -> DecodeResult {
@@ -462,8 +502,11 @@ impl RelayedBPGDDecoder {
         }
 
         last_result.unwrap_or_else(|| {
-            self.bp_decoder
-                .build_result(false, self.bp_decoder.compute_decoded_detectors(), leg_budget)
+            self.bp_decoder.build_result(
+                false,
+                self.bp_decoder.compute_decoded_detectors(),
+                leg_budget,
+            )
         })
     }
 }
@@ -487,8 +530,11 @@ impl Decoder for RelayedBPGDDecoder {
         let mut last_result: Option<DecodeResult> = None;
         let mut converged_stage_index: Option<usize> = None;
 
-        let leg_budgets = std::iter::once(self.config.relay_config.pre_iter)
-            .chain(std::iter::repeat(self.config.relay_config.set_max_iter).take(self.config.relay_config.num_sets));
+        let leg_budgets =
+            std::iter::once(self.config.relay_config.pre_iter).chain(std::iter::repeat_n(
+                self.config.relay_config.set_max_iter,
+                self.config.relay_config.num_sets,
+            ));
 
         for (leg_index, leg_budget) in leg_budgets.enumerate() {
             if leg_index == 0 {

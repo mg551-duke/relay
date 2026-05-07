@@ -14,7 +14,9 @@ use pyo3::prelude::*;
 use crate::decoder::{get_sprs_bit_matrix_from_python, DecodeResult, DynDecoder};
 use numpy::{IntoPyArray, PyArray1, PyArray2, PyArrayMethods, PyReadonlyArray1, PyReadonlyArray2};
 use relay_bp::bp::min_sum::MinSumDecoderConfig;
-use relay_bp::bp::relay::{GammaSampler, RelayDecoder, RelayDecoderConfig, StoppingCriterion};
+use relay_bp::bp::relay::{
+    GammaSampler, MessageMixBernoulliSampler, RelayDecoder, RelayDecoderConfig, StoppingCriterion,
+};
 use relay_bp::decoder::Bit;
 
 macro_rules! create_bp_interface {
@@ -27,7 +29,7 @@ macro_rules! create_bp_interface {
         impl $name {
             #[new]
             #[pyo3(signature = (check_matrix, error_priors, alpha=None, alpha_iteration_scaling_factor=1.0, gamma0=0.1, c_damp=None, data_scale_value=None, max_data_value=None, explicit_edge_message_weights=None, pre_iter=80, num_sets=300,
-                set_max_iter=60, gamma_dist_interval=(-0.24, 0.66), gamma_bernoulli=None, explicit_gammas=None, explicit_c_damp_messages=None, c_damp_dist_interval=None, relay_posteriors=true, stop_nconv=1,
+                set_max_iter=60, gamma_dist_interval=(-0.24, 0.66), gamma_bernoulli=None, explicit_gammas=None, explicit_c_damp_messages=None, c_damp_dist_interval=None, message_mix_bernoulli=None, relay_posteriors=true, stop_nconv=1,
                 stopping_criterion="nconv".to_string(), logging=false, seed=0))]
             #[allow(clippy::missing_transmute_annotations, clippy::too_many_arguments)]
             pub fn new(
@@ -49,6 +51,7 @@ macro_rules! create_bp_interface {
                 explicit_gammas: Option<&Bound<'_, PyArray2<f64>>>,
                 explicit_c_damp_messages: Option<&Bound<'_, PyArray2<f64>>>,
                 c_damp_dist_interval: Option<(f64, f64)>,
+                message_mix_bernoulli: Option<(f64, f64, f64, f64, f64, f64)>,
                 relay_posteriors: bool,
                 stop_nconv: usize,
                 stopping_criterion: String,
@@ -60,6 +63,7 @@ macro_rules! create_bp_interface {
                     c_damp,
                     explicit_c_damp_messages.is_some(),
                     c_damp_dist_interval,
+                    message_mix_bernoulli.is_some(),
                 )?;
 
                 let min_sum_config = MinSumDecoderConfig {
@@ -69,6 +73,8 @@ macro_rules! create_bp_interface {
                     alpha_iteration_scaling_factor,
                     c_damp,
                     explicit_c_damp_messages: None,
+                    explicit_message_mix_fresh_coefficients: None,
+                    explicit_message_mix_previous_coefficients: None,
                     explicit_edge_message_weights: explicit_edge_message_weights
                         .map(|weights| unsafe { weights.as_array() }.to_owned()),
                     gamma0,
@@ -98,6 +104,7 @@ macro_rules! create_bp_interface {
                     explicit_c_damp_messages: explicit_c_damp_messages
                         .map(|explicit_c_damp_messages| unsafe { explicit_c_damp_messages.as_array() }.to_owned()),
                     c_damp_dist_interval,
+                    message_mix_bernoulli: message_mix_sampler_from_args(message_mix_bernoulli)?,
                     relay_posteriors,
                     stopping_criterion,
                     logging,
@@ -190,18 +197,48 @@ fn validate_damping_args(
     c_damp: Option<f64>,
     has_explicit_c_damp_messages: bool,
     c_damp_dist_interval: Option<(f64, f64)>,
+    has_message_mix_bernoulli: bool,
 ) -> PyResult<()> {
+    let specified = (c_damp.is_some() as usize)
+        + (has_explicit_c_damp_messages as usize)
+        + (c_damp_dist_interval.is_some() as usize)
+        + (has_message_mix_bernoulli as usize);
+    if specified > 1 {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "message_mix_bernoulli cannot be combined with c_damp, explicit_c_damp_messages, or c_damp_dist_interval.",
+        ));
+    }
     if let Some(value) = c_damp {
         if !value.is_finite() || !(0.0..=1.0).contains(&value) {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "c_damp must be finite and in [0, 1].",
             ));
         }
-        if has_explicit_c_damp_messages || c_damp_dist_interval.is_some() {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "c_damp cannot be combined with explicit_c_damp_messages or c_damp_dist_interval.",
-            ));
-        }
     }
     Ok(())
+}
+
+fn message_mix_sampler_from_args(
+    message_mix_bernoulli: Option<(f64, f64, f64, f64, f64, f64)>,
+) -> PyResult<Option<MessageMixBernoulliSampler>> {
+    match message_mix_bernoulli {
+        Some((
+            fresh_negative,
+            fresh_positive,
+            fresh_p_positive,
+            previous_negative,
+            previous_positive,
+            previous_p_positive,
+        )) => MessageMixBernoulliSampler::new(
+            fresh_negative,
+            fresh_positive,
+            fresh_p_positive,
+            previous_negative,
+            previous_positive,
+            previous_p_positive,
+        )
+        .map(Some)
+        .map_err(pyo3::exceptions::PyValueError::new_err),
+        None => Ok(None),
+    }
 }

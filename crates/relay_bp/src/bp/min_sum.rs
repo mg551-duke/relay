@@ -28,6 +28,8 @@ pub struct MinSumDecoderConfig {
     pub alpha_iteration_scaling_factor: f64,
     pub c_damp: Option<f64>,
     pub explicit_c_damp_messages: Option<Array1<f64>>,
+    pub explicit_message_mix_fresh_coefficients: Option<Array1<f64>>,
+    pub explicit_message_mix_previous_coefficients: Option<Array1<f64>>,
     pub explicit_edge_message_weights: Option<Array1<f64>>,
     pub gamma0: Option<f64>,
     pub data_scale_value: Option<f64>,
@@ -45,6 +47,8 @@ impl Default for MinSumDecoderConfig {
             alpha_iteration_scaling_factor: 1.,
             c_damp: None,
             explicit_c_damp_messages: None,
+            explicit_message_mix_fresh_coefficients: None,
+            explicit_message_mix_previous_coefficients: None,
             explicit_edge_message_weights: None,
             gamma0: None,
             data_scale_value: None,
@@ -92,6 +96,8 @@ pub struct MinSumBPDecoder<N: PartialEq + Default + Clone + Copy> {
     posterior_ratios: Array1<N>,
     memory_strengths: Array1<N>,
     explicit_c_damp_messages: Option<Array1<N>>,
+    explicit_message_mix_fresh_coefficients: Option<Array1<N>>,
+    explicit_message_mix_previous_coefficients: Option<Array1<N>>,
     explicit_edge_message_weights: Option<Array1<N>>,
     decoding: Array1<Bit>,
     max_data_value: Option<N>,
@@ -128,6 +134,16 @@ where
         assert!(
             !(config.c_damp.is_some() && config.explicit_c_damp_messages.is_some()),
             "Scalar c_damp and explicit_c_damp_messages are mutually exclusive.",
+        );
+        assert!(
+            config.explicit_message_mix_fresh_coefficients.is_some()
+                == config.explicit_message_mix_previous_coefficients.is_some(),
+            "Message-mix fresh and previous coefficient arrays must be provided together.",
+        );
+        assert!(
+            !(config.explicit_message_mix_fresh_coefficients.is_some()
+                && (config.c_damp.is_some() || config.explicit_c_damp_messages.is_some())),
+            "message-mix coefficients cannot be combined with c_damp or explicit_c_damp_messages.",
         );
         let check_to_variable = MinSumBPDecoder::build_check_to_variable(check_matrix.clone());
         let variable_to_check = MinSumBPDecoder::build_variable_to_check(check_matrix.clone());
@@ -166,43 +182,69 @@ where
 
         let memory_strengths = Array1::from_elem(check_matrix.cols(), N::zero());
 
-        let explicit_c_damp_messages = config
-            .explicit_c_damp_messages
-            .as_ref()
-            .map(|messages| {
+        let explicit_c_damp_messages = config.explicit_c_damp_messages.as_ref().map(|messages| {
+            assert!(
+                messages.len() == check_to_variable.nnz(),
+                "explicit_c_damp_messages length {} must match check-matrix nnz {}.",
+                messages.len(),
+                check_to_variable.nnz(),
+            );
+            messages.clone().mapv_into_any(|value| {
                 assert!(
-                    messages.len() == check_to_variable.nnz(),
-                    "explicit_c_damp_messages length {} must match check-matrix nnz {}.",
-                    messages.len(),
-                    check_to_variable.nnz(),
+                    value.is_finite() && (0.0..=1.0).contains(&value),
+                    "Explicit damping values must be finite and in [0, 1]; got {value}.",
                 );
-                messages.clone().mapv_into_any(|value| {
-                    assert!(
-                        value.is_finite() && (0.0..=1.0).contains(&value),
-                        "Explicit damping values must be finite and in [0, 1]; got {value}.",
-                    );
-                    N::from_f64(value).unwrap()
-                })
+                N::from_f64(value).unwrap()
+            })
+        });
+
+        let explicit_message_mix_fresh_coefficients = config
+            .explicit_message_mix_fresh_coefficients
+            .as_ref()
+            .map(|coefficients| {
+                Self::validate_message_mix_coefficients(
+                    coefficients,
+                    check_to_variable.nnz(),
+                    "explicit_message_mix_fresh_coefficients",
+                );
+                coefficients
+                    .clone()
+                    .mapv_into_any(|value| N::from_f64(value).unwrap())
             });
 
-        let explicit_edge_message_weights = config
-            .explicit_edge_message_weights
+        let explicit_message_mix_previous_coefficients = config
+            .explicit_message_mix_previous_coefficients
             .as_ref()
-            .map(|weights| {
-                assert!(
-                    weights.len() == check_to_variable.nnz(),
-                    "explicit_edge_message_weights length {} must match check-matrix nnz {}.",
-                    weights.len(),
+            .map(|coefficients| {
+                Self::validate_message_mix_coefficients(
+                    coefficients,
                     check_to_variable.nnz(),
+                    "explicit_message_mix_previous_coefficients",
                 );
-                weights.clone().mapv_into_any(|value| {
-                    assert!(
-                        value.is_finite(),
-                        "Explicit edge-message weights must be finite; got {value}.",
-                    );
-                    N::from_f64(value).unwrap()
-                })
+                coefficients
+                    .clone()
+                    .mapv_into_any(|value| N::from_f64(value).unwrap())
             });
+
+        let explicit_edge_message_weights =
+            config
+                .explicit_edge_message_weights
+                .as_ref()
+                .map(|weights| {
+                    assert!(
+                        weights.len() == check_to_variable.nnz(),
+                        "explicit_edge_message_weights length {} must match check-matrix nnz {}.",
+                        weights.len(),
+                        check_to_variable.nnz(),
+                    );
+                    weights.clone().mapv_into_any(|value| {
+                        assert!(
+                            value.is_finite(),
+                            "Explicit edge-message weights must be finite; got {value}.",
+                        );
+                        N::from_f64(value).unwrap()
+                    })
+                });
 
         let posterior_ratios = if config.gamma0.is_some() {
             log_prior_ratios.clone()
@@ -223,6 +265,8 @@ where
             posterior_ratios,
             memory_strengths,
             explicit_c_damp_messages,
+            explicit_message_mix_fresh_coefficients,
+            explicit_message_mix_previous_coefficients,
             explicit_edge_message_weights,
             decoding,
             max_data_value,
@@ -277,6 +321,10 @@ where
 
     pub fn set_explicit_c_damp_messages_f64(&mut self, explicit_c_damp_messages: Array1<f64>) {
         assert!(
+            self.explicit_message_mix_fresh_coefficients.is_none(),
+            "explicit_c_damp_messages cannot be combined with message-mix coefficients.",
+        );
+        assert!(
             explicit_c_damp_messages.len() == self.check_to_variable.nnz(),
             "explicit_c_damp_messages length {} must match check-matrix nnz {}.",
             explicit_c_damp_messages.len(),
@@ -293,6 +341,36 @@ where
 
     pub fn clear_explicit_c_damp_messages(&mut self) {
         self.explicit_c_damp_messages = None;
+    }
+
+    pub fn set_explicit_message_mix_coefficients_f64(
+        &mut self,
+        fresh_coefficients: Array1<f64>,
+        previous_coefficients: Array1<f64>,
+    ) {
+        assert!(
+            self.config.c_damp.is_none() && self.explicit_c_damp_messages.is_none(),
+            "message-mix coefficients cannot be combined with c_damp or explicit_c_damp_messages.",
+        );
+        Self::validate_message_mix_coefficients(
+            &fresh_coefficients,
+            self.check_to_variable.nnz(),
+            "fresh message-mix coefficients",
+        );
+        Self::validate_message_mix_coefficients(
+            &previous_coefficients,
+            self.check_to_variable.nnz(),
+            "previous message-mix coefficients",
+        );
+        self.explicit_message_mix_fresh_coefficients =
+            Some(fresh_coefficients.mapv_into_any(|value| N::from_f64(value).unwrap()));
+        self.explicit_message_mix_previous_coefficients =
+            Some(previous_coefficients.mapv_into_any(|value| N::from_f64(value).unwrap()));
+    }
+
+    pub fn clear_explicit_message_mix_coefficients(&mut self) {
+        self.explicit_message_mix_fresh_coefficients = None;
+        self.explicit_message_mix_previous_coefficients = None;
     }
 
     pub fn set_explicit_edge_message_weights_f64(
@@ -320,7 +398,9 @@ where
     }
 
     pub fn damping_mode(&self) -> &'static str {
-        if self.explicit_c_damp_messages.is_some() {
+        if self.explicit_message_mix_fresh_coefficients.is_some() {
+            "message_mix"
+        } else if self.explicit_c_damp_messages.is_some() {
             "edge_message"
         } else if self.config.c_damp.is_some() {
             "scalar"
@@ -330,7 +410,22 @@ where
     }
 
     fn damping_bounds(&self) -> (Option<f64>, Option<f64>) {
-        if let Some(explicit_c_damp_messages) = self.explicit_c_damp_messages.as_ref() {
+        if let (Some(fresh), Some(previous)) = (
+            self.explicit_message_mix_fresh_coefficients.as_ref(),
+            self.explicit_message_mix_previous_coefficients.as_ref(),
+        ) {
+            let min = fresh
+                .iter()
+                .chain(previous.iter())
+                .filter_map(|value| value.to_f64())
+                .min_by(|a, b| a.total_cmp(b));
+            let max = fresh
+                .iter()
+                .chain(previous.iter())
+                .filter_map(|value| value.to_f64())
+                .max_by(|a, b| a.total_cmp(b));
+            (min, max)
+        } else if let Some(explicit_c_damp_messages) = self.explicit_c_damp_messages.as_ref() {
             let min = explicit_c_damp_messages
                 .iter()
                 .filter_map(|value| value.to_f64())
@@ -343,6 +438,23 @@ where
         } else {
             (self.config.c_damp, self.config.c_damp)
         }
+    }
+
+    fn validate_message_mix_coefficients(
+        coefficients: &Array1<f64>,
+        expected_len: usize,
+        label: &str,
+    ) {
+        assert!(
+            coefficients.len() == expected_len,
+            "{label} length {} must match check-matrix nnz {}.",
+            coefficients.len(),
+            expected_len,
+        );
+        assert!(
+            coefficients.iter().all(|value| value.is_finite()),
+            "{label} values must be finite.",
+        );
     }
 
     // Construct a new check message graph
@@ -511,15 +623,23 @@ where
                     check_to_variable = check_to_variable.neg();
                 }
 
-                if let Some(explicit_c_damp_messages) = self.explicit_c_damp_messages.as_ref() {
-                    let map_ind = self.variable_to_check_nnz_map[ind];
+                let map_ind = self.variable_to_check_nnz_map[ind];
+                if let (Some(fresh_coefficients), Some(previous_coefficients)) = (
+                    self.explicit_message_mix_fresh_coefficients.as_ref(),
+                    self.explicit_message_mix_previous_coefficients.as_ref(),
+                ) {
+                    let old_check_to_variable = self.check_to_variable.data()[map_ind];
+                    check_to_variable = (fresh_coefficients[map_ind] * check_to_variable)
+                        + (previous_coefficients[map_ind] * old_check_to_variable);
+                } else if let Some(explicit_c_damp_messages) =
+                    self.explicit_c_damp_messages.as_ref()
+                {
                     let old_check_to_variable = self.check_to_variable.data()[map_ind];
                     let c_damp_n = explicit_c_damp_messages[map_ind];
                     let one_minus_c_damp_n = N::from_f64(1.0 - c_damp_n.to_f64().unwrap()).unwrap();
-                    check_to_variable =
-                        (c_damp_n * check_to_variable) + (one_minus_c_damp_n * old_check_to_variable);
+                    check_to_variable = (c_damp_n * check_to_variable)
+                        + (one_minus_c_damp_n * old_check_to_variable);
                 } else if let Some(c_damp) = self.config.c_damp {
-                    let map_ind = self.variable_to_check_nnz_map[ind];
                     let old_check_to_variable = self.check_to_variable.data()[map_ind];
                     let c_damp_n = N::from_f64(c_damp).unwrap();
                     let one_minus_c_damp_n = N::from_f64(1.0 - c_damp).unwrap();
@@ -615,8 +735,7 @@ where
                 );
             }
 
-            if let Some(explicit_edge_message_weights) =
-                self.explicit_edge_message_weights.as_ref()
+            if let Some(explicit_edge_message_weights) = self.explicit_edge_message_weights.as_ref()
             {
                 for ind in data_range.clone() {
                     let map_ind = self.check_to_variable_nnz_map[ind];
@@ -873,6 +992,58 @@ mod tests {
         assert_eq!(result.decoded_detectors, detectors);
         assert_eq!(result.max_iter, iterations);
         assert!(result.success);
+    }
+
+    #[test]
+    fn message_mix_coefficients_apply_to_fresh_and_previous_check_messages() {
+        let check_matrix = array![[1, 1, 0], [0, 1, 1],];
+        let check_matrix: SparseBipartiteGraph<_> = SparseBipartiteGraph::from_dense(check_matrix);
+        let detectors: Array1<Bit> = array![1, 1];
+        let error_priors = array![0.003, 0.003, 0.003];
+
+        let mut mixed: MinSumBPDecoder<f64> = MinSumBPDecoder::new(
+            Arc::new(check_matrix.clone()),
+            Arc::new(MinSumDecoderConfig {
+                error_priors: error_priors.clone(),
+                max_iter: 1,
+                alpha: Some(1.0),
+                gamma0: None,
+                ..Default::default()
+            }),
+        );
+        mixed.initialize_decoder();
+        mixed.set_explicit_message_mix_coefficients_f64(
+            Array1::from_elem(4, 0.5),
+            Array1::from_elem(4, 0.0),
+        );
+        mixed.run_iteration(detectors.view());
+        let mixed_result = mixed.build_result(false, mixed.compute_decoded_detectors(), 1);
+
+        let mut reference: MinSumBPDecoder<f64> = MinSumBPDecoder::new(
+            Arc::new(check_matrix),
+            Arc::new(MinSumDecoderConfig {
+                error_priors,
+                max_iter: 1,
+                alpha: Some(0.5),
+                gamma0: None,
+                ..Default::default()
+            }),
+        );
+        reference.initialize_decoder();
+        reference.run_iteration(detectors.view());
+        let reference_result =
+            reference.build_result(false, reference.compute_decoded_detectors(), 1);
+
+        assert_eq!(mixed_result.damping_mode, "message_mix");
+        assert_eq!(mixed_result.damping_min, Some(0.0));
+        assert_eq!(mixed_result.damping_max, Some(0.5));
+        for (mixed, reference) in mixed_result
+            .posterior_ratios
+            .iter()
+            .zip(reference_result.posterior_ratios.iter())
+        {
+            assert!((mixed - reference).abs() < 1.0e-12);
+        }
     }
 
     #[test]

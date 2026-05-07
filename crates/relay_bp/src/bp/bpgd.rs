@@ -26,7 +26,7 @@
 use super::min_sum::{MinSumBPDecoder, MinSumDecoderConfig};
 use super::relay::{RelayDecoder, RelayDecoderConfig};
 use crate::decoder::{
-    Bit, BPGDExtraResult, BPExtraResult, BPStageResult, DecodeResult, Decoder, DecoderRunner,
+    BPExtraResult, BPGDExtraResult, BPStageResult, Bit, DecodeResult, Decoder, DecoderRunner,
     Mod2Mul, SparseBitMatrix,
 };
 use ndarray::{Array1, ArrayView1};
@@ -102,6 +102,8 @@ impl BPGDDecoder {
                 alpha_iteration_scaling_factor: config.alpha_iteration_scaling_factor,
                 c_damp: config.c_damp,
                 explicit_c_damp_messages: config.explicit_c_damp_messages.clone(),
+                explicit_message_mix_fresh_coefficients: None,
+                explicit_message_mix_previous_coefficients: None,
                 explicit_edge_message_weights: None,
                 gamma0: None,
                 data_scale_value: None,
@@ -214,7 +216,8 @@ impl BPGDDecoder {
         if count == 0 {
             return 0;
         }
-        let indices = self.choose_high_confidence_indices(&result.posterior_ratios, fixed_bits, count);
+        let indices =
+            self.choose_high_confidence_indices(&result.posterior_ratios, fixed_bits, count);
         for index in &indices {
             fixed_bits[*index] = Some(result.decoding[*index]);
         }
@@ -265,6 +268,8 @@ impl BPGDDecoder {
                         alpha_iteration_scaling_factor: self.config.alpha_iteration_scaling_factor,
                         c_damp: None,
                         explicit_c_damp_messages: None,
+                        explicit_message_mix_fresh_coefficients: None,
+                        explicit_message_mix_previous_coefficients: None,
                         explicit_edge_message_weights: None,
                         gamma0: *gamma0,
                         data_scale_value: None,
@@ -294,7 +299,11 @@ impl BPGDDecoder {
         let num_vars = self.base_log_prior_ratios.len();
         let low_rounds = self.config.r_low.min(num_vars);
         let high_rounds = self.config.r_high.min(num_vars);
-        let pre_iters = if self.config.pre_iter > 0 && num_vars > 0 { 2 } else { 0 };
+        let pre_iters = if self.config.pre_iter > 0 && num_vars > 0 {
+            2
+        } else {
+            0
+        };
         let fallback_max = match &self.config.fallback {
             BPGDFallbackConfig::None => 0,
             BPGDFallbackConfig::Relay { relay_config, .. } => {
@@ -354,11 +363,9 @@ impl Decoder for BPGDDecoder {
                 final_result = Some(result);
                 break;
             }
-            if let Some(index) = self.choose_decimation_index(
-                &result.posterior_ratios,
-                &fixed_bits,
-                true,
-            ) {
+            if let Some(index) =
+                self.choose_decimation_index(&result.posterior_ratios, &fixed_bits, true)
+            {
                 fixed_bits[index] = Some(result.decoding[index]);
             } else {
                 final_result = Some(result);
@@ -406,11 +413,9 @@ impl Decoder for BPGDDecoder {
                     final_result = Some(result);
                     break;
                 }
-                if let Some(index) = self.choose_decimation_index(
-                    &result.posterior_ratios,
-                    &fixed_bits,
-                    false,
-                ) {
+                if let Some(index) =
+                    self.choose_decimation_index(&result.posterior_ratios, &fixed_bits, false)
+                {
                     fixed_bits[index] = Some(result.decoding[index]);
                 } else {
                     final_result = Some(result);
@@ -449,7 +454,11 @@ impl Decoder for BPGDDecoder {
         }
 
         let mut result = final_result.unwrap_or_else(|| {
-            self.run_stage(detectors, &fixed_bits, self.config.t_high.max(self.config.t_low))
+            self.run_stage(
+                detectors,
+                &fixed_bits,
+                self.config.t_high.max(self.config.t_low),
+            )
         });
         if total_iterations == 0 {
             total_iterations = result.iterations;

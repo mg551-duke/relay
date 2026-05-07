@@ -32,15 +32,24 @@ def _validate_damping_sources(
     c_damp: float | None = None,
     explicit_c_damp_messages: np.ndarray | None = None,
     c_damp_dist_interval: tuple[float, float] | None = None,
+    message_mix_bernoulli: (
+        tuple[float, float, float, float, float, float] | None
+    ) = None,
 ) -> None:
     specified = sum(
         value is not None
-        for value in (c_damp, explicit_c_damp_messages, c_damp_dist_interval)
+        for value in (
+            c_damp,
+            explicit_c_damp_messages,
+            c_damp_dist_interval,
+            message_mix_bernoulli,
+        )
     )
     if specified > 1:
         raise ValueError(
             f"{decoder_label} accepts at most one damping source among "
-            "`c_damp`, `explicit_c_damp_messages`, and `c_damp_dist_interval`."
+            "`c_damp`, `explicit_c_damp_messages`, `c_damp_dist_interval`, "
+            "and `message_mix_bernoulli`."
         )
 
 
@@ -315,7 +324,7 @@ class SinterDecoder_RelayBP(SinterDecoder_BaseBP):
     def __init__(
         self,
         alpha: float | None = None,
-        gamma0: float = 0.1,
+        gamma0: float | None = 0.1,
         pre_iter: int = 60,
         num_sets: int = 60,
         set_max_iter: int = 60,
@@ -326,6 +335,9 @@ class SinterDecoder_RelayBP(SinterDecoder_BaseBP):
         c_damp: float | None = None,
         explicit_c_damp_messages: np.ndarray | None = None,
         c_damp_dist_interval: tuple[float, float] | None = None,
+        message_mix_bernoulli: (
+            tuple[float, float, float, float, float, float] | None
+        ) = None,
         relay_posteriors: bool = True,
         stop_nconv: int = 5,
         stopping_criterion: str = "nconv",
@@ -346,6 +358,7 @@ class SinterDecoder_RelayBP(SinterDecoder_BaseBP):
             c_damp=c_damp,
             explicit_c_damp_messages=explicit_c_damp_messages,
             c_damp_dist_interval=c_damp_dist_interval,
+            message_mix_bernoulli=message_mix_bernoulli,
         )
         self.alpha = alpha
         self.gamma0 = gamma0
@@ -362,6 +375,9 @@ class SinterDecoder_RelayBP(SinterDecoder_BaseBP):
         self.explicit_c_damp_messages = explicit_c_damp_messages
         self.c_damp_dist_interval = (
             tuple(c_damp_dist_interval) if c_damp_dist_interval is not None else None
+        )
+        self.message_mix_bernoulli = (
+            tuple(message_mix_bernoulli) if message_mix_bernoulli is not None else None
         )
         self.relay_posteriors = relay_posteriors
         self.stop_nconv = stop_nconv
@@ -398,6 +414,7 @@ class SinterDecoder_RelayBP(SinterDecoder_BaseBP):
             c_damp=self.c_damp,
             explicit_c_damp_messages=self.explicit_c_damp_messages,
             c_damp_dist_interval=self.c_damp_dist_interval,
+            message_mix_bernoulli=self.message_mix_bernoulli,
             relay_posteriors=self.relay_posteriors,
             stop_nconv=self.stop_nconv,
             stopping_criterion=self.stopping_criterion,
@@ -417,7 +434,7 @@ class SinterDecoder_MemBP(SinterDecoder_BaseBP):
         self,
         max_iter: int = 100,
         alpha: float | None = None,
-        gamma0: float = 0.1,
+        gamma0: float | None = 0.1,
         c_damp: float | None = None,
         explicit_c_damp_messages: np.ndarray | None = None,
         parallel: bool = False,
@@ -598,7 +615,7 @@ class SinterDecoder_BPGD(SinterDecoder_BaseBP):
         random_decimation_candidates: int = 1,
         random_seed: int = 0,
         fallback_kind: str = "none",
-        fallback_gamma0: float = 0.1,
+        fallback_gamma0: float | None = 0.1,
         fallback_pre_iter: int = 80,
         fallback_num_sets: int = 60,
         fallback_set_max_iter: int = 60,
@@ -716,7 +733,7 @@ class SinterDecoder_RelayedBPGD(SinterDecoder_BaseBP):
     def __init__(
         self,
         alpha: float | None = None,
-        gamma0: float = 0.1,
+        gamma0: float | None = 0.1,
         c_damp: float | None = None,
         random_decimation_candidates: int = 1,
         pre_iter: int = 80,
@@ -727,6 +744,9 @@ class SinterDecoder_RelayedBPGD(SinterDecoder_BaseBP):
         explicit_gammas: np.ndarray | None = None,
         explicit_c_damp_messages: np.ndarray | None = None,
         c_damp_dist_interval: tuple[float, float] | None = None,
+        message_mix_bernoulli: (
+            tuple[float, float, float, float, float, float] | None
+        ) = None,
         relay_posteriors: bool = True,
         stop_nconv: int = 5,
         stopping_criterion: str = "nconv",
@@ -753,6 +773,7 @@ class SinterDecoder_RelayedBPGD(SinterDecoder_BaseBP):
             c_damp=c_damp,
             explicit_c_damp_messages=explicit_c_damp_messages,
             c_damp_dist_interval=c_damp_dist_interval,
+            message_mix_bernoulli=message_mix_bernoulli,
         )
         self.alpha = alpha
         self.gamma0 = gamma0
@@ -769,6 +790,9 @@ class SinterDecoder_RelayedBPGD(SinterDecoder_BaseBP):
         self.explicit_c_damp_messages = explicit_c_damp_messages
         self.c_damp_dist_interval = (
             tuple(c_damp_dist_interval) if c_damp_dist_interval is not None else None
+        )
+        self.message_mix_bernoulli = (
+            tuple(message_mix_bernoulli) if message_mix_bernoulli is not None else None
         )
         self.relay_posteriors = relay_posteriors
         self.stop_nconv = stop_nconv
@@ -812,6 +836,7 @@ class SinterDecoder_RelayedBPGD(SinterDecoder_BaseBP):
             explicit_gammas=self.explicit_gammas,
             explicit_c_damp_messages=self.explicit_c_damp_messages,
             c_damp_dist_interval=self.c_damp_dist_interval,
+            message_mix_bernoulli=self.message_mix_bernoulli,
             relay_posteriors=self.relay_posteriors,
             stop_nconv=self.stop_nconv,
             stopping_criterion=self.stopping_criterion,
@@ -899,9 +924,10 @@ def decoder_from_spec(spec: dict[str, Any], **decoder_kwargs: Any) -> Decoder:
             }
             return SinterDecoder_BPGD(decoder_label=name, **params, **common)
         if kind == "Relayed_BPGD":
+            gamma0 = params.get("gamma0", 0.1)
             params = {
                 "alpha": params.get("alpha", None),
-                "gamma0": float(params.get("gamma0", 0.1)),
+                "gamma0": None if gamma0 is None else float(gamma0),
                 "c_damp": params.get("c_damp", None),
                 "random_decimation_candidates": int(
                     params.get("random_decimation_candidates", 1)
@@ -912,11 +938,13 @@ def decoder_from_spec(spec: dict[str, Any], **decoder_kwargs: Any) -> Decoder:
                 "gamma_dist_interval": tuple(
                     params.get("gamma_dist_interval", (-0.24, 0.66))
                 ),
+                "gamma_bernoulli": params.get("gamma_bernoulli", None),
                 "explicit_gammas": params.get("explicit_gammas", None),
                 "explicit_c_damp_messages": params.get(
                     "explicit_c_damp_messages", None
                 ),
                 "c_damp_dist_interval": params.get("c_damp_dist_interval", None),
+                "message_mix_bernoulli": params.get("message_mix_bernoulli", None),
                 "relay_posteriors": bool(params.get("relay_posteriors", True)),
                 "stop_nconv": int(params.get("stop_nconv", 5)),
                 "stopping_criterion": str(params.get("stopping_criterion", "nconv")),
@@ -1005,7 +1033,8 @@ def sinter_decoders(**decoder_kwargs: dict) -> dict[str, Decoder]:
 
     max_iter = int(specific.get("max_iter", 100))
     alpha = specific.get("alpha", None)
-    gamma0 = float(specific.get("gamma0", 0.1))
+    gamma0_value = specific.get("gamma0", 0.1)
+    gamma0 = None if gamma0_value is None else float(gamma0_value)
     c_damp = specific.get("c_damp", None)
     explicit_c_damp_messages = specific.get("explicit_c_damp_messages", None)
 
@@ -1018,10 +1047,12 @@ def sinter_decoders(**decoder_kwargs: dict) -> dict[str, Decoder]:
         "gamma_dist_interval": tuple(
             specific.get("gamma_dist_interval", (-0.24, 0.66))
         ),
+        "gamma_bernoulli": specific.get("gamma_bernoulli", None),
         "explicit_gammas": specific.get("explicit_gammas", None),
         "c_damp": c_damp,
         "explicit_c_damp_messages": specific.get("explicit_c_damp_messages", None),
         "c_damp_dist_interval": specific.get("c_damp_dist_interval", None),
+        "message_mix_bernoulli": specific.get("message_mix_bernoulli", None),
         "relay_posteriors": bool(specific.get("relay_posteriors", True)),
         "stop_nconv": int(specific.get("stop_nconv", 5)),
         "stopping_criterion": str(specific.get("stopping_criterion", "nconv")),
@@ -1089,7 +1120,9 @@ def sinter_decoders(**decoder_kwargs: dict) -> dict[str, Decoder]:
             num_sets=relay_kwargs["num_sets"],
             set_max_iter=relay_kwargs["set_max_iter"],
             gamma_dist_interval=relay_kwargs["gamma_dist_interval"],
+            gamma_bernoulli=relay_kwargs["gamma_bernoulli"],
             explicit_gammas=relay_kwargs["explicit_gammas"],
+            message_mix_bernoulli=relay_kwargs["message_mix_bernoulli"],
             stop_nconv=relay_kwargs["stop_nconv"],
             stopping_criterion=relay_kwargs["stopping_criterion"],
             logging=relay_kwargs["logging"],

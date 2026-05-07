@@ -41,12 +41,25 @@ impl Default for StoppingCriterion {
 
 #[derive(Clone, Debug)]
 pub enum GammaSampler {
-    UniformInterval { low: f64, high: f64 },
+    UniformInterval {
+        low: f64,
+        high: f64,
+    },
     BernoulliTwoPoint {
         negative: f64,
         positive: f64,
         p_positive: f64,
     },
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct MessageMixBernoulliSampler {
+    pub fresh_negative: f64,
+    pub fresh_positive: f64,
+    pub fresh_p_positive: f64,
+    pub previous_negative: f64,
+    pub previous_positive: f64,
+    pub previous_p_positive: f64,
 }
 
 impl GammaSampler {
@@ -127,6 +140,95 @@ impl GammaSampler {
     }
 }
 
+impl MessageMixBernoulliSampler {
+    pub fn new(
+        fresh_negative: f64,
+        fresh_positive: f64,
+        fresh_p_positive: f64,
+        previous_negative: f64,
+        previous_positive: f64,
+        previous_p_positive: f64,
+    ) -> Result<Self, String> {
+        let sampler = Self {
+            fresh_negative,
+            fresh_positive,
+            fresh_p_positive,
+            previous_negative,
+            previous_positive,
+            previous_p_positive,
+        };
+        sampler.validate()?;
+        Ok(sampler)
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        validate_signed_two_point(
+            "fresh message-mix",
+            self.fresh_negative,
+            self.fresh_positive,
+            self.fresh_p_positive,
+        )?;
+        validate_signed_two_point(
+            "previous message-mix",
+            self.previous_negative,
+            self.previous_positive,
+            self.previous_p_positive,
+        )?;
+        Ok(())
+    }
+
+    pub fn sample(&self, rng: &mut rand::rngs::StdRng) -> (f64, f64) {
+        (
+            sample_signed_two_point(
+                self.fresh_negative,
+                self.fresh_positive,
+                self.fresh_p_positive,
+                rng,
+            ),
+            sample_signed_two_point(
+                self.previous_negative,
+                self.previous_positive,
+                self.previous_p_positive,
+                rng,
+            ),
+        )
+    }
+}
+
+fn validate_signed_two_point(
+    label: &str,
+    negative: f64,
+    positive: f64,
+    p_positive: f64,
+) -> Result<(), String> {
+    if !negative.is_finite() || !positive.is_finite() || !p_positive.is_finite() {
+        return Err(format!("{label} Bernoulli parameters must be finite."));
+    }
+    if negative > 0.0 {
+        return Err(format!("{label} negative value must be <= 0."));
+    }
+    if positive < 0.0 {
+        return Err(format!("{label} positive value must be >= 0."));
+    }
+    if !(0.0..=1.0).contains(&p_positive) {
+        return Err(format!("{label} p_positive must be in [0, 1]."));
+    }
+    Ok(())
+}
+
+fn sample_signed_two_point(
+    negative: f64,
+    positive: f64,
+    p_positive: f64,
+    rng: &mut rand::rngs::StdRng,
+) -> f64 {
+    if rng.gen::<f64>() < p_positive {
+        positive
+    } else {
+        negative
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct RelayDecoderConfig {
     pub pre_iter: usize,
@@ -137,6 +239,7 @@ pub struct RelayDecoderConfig {
     pub explicit_gammas: Option<Array2<f64>>,
     pub explicit_c_damp_messages: Option<Array2<f64>>,
     pub c_damp_dist_interval: Option<(f64, f64)>,
+    pub message_mix_bernoulli: Option<MessageMixBernoulliSampler>,
     pub relay_posteriors: bool,
     pub stopping_criterion: StoppingCriterion,
     pub logging: bool,
@@ -154,6 +257,7 @@ impl Default for RelayDecoderConfig {
             explicit_gammas: None,
             explicit_c_damp_messages: None,
             c_damp_dist_interval: None,
+            message_mix_bernoulli: None,
             relay_posteriors: true,
             stopping_criterion: StoppingCriterion::default(),
             logging: false,
@@ -225,6 +329,11 @@ where
             .effective_gamma_sampler()
             .validate()
             .expect("Invalid relay gamma sampler.");
+        if let Some(message_mix) = relay_config.message_mix_bernoulli {
+            message_mix
+                .validate()
+                .expect("Invalid relay message-mix sampler.");
+        }
         assert!(
             !(min_sum_config.c_damp.is_some()
                 && (relay_config.explicit_c_damp_messages.is_some()
@@ -232,8 +341,25 @@ where
             "Scalar c_damp cannot be combined with relay explicit_c_damp_messages or c_damp_dist_interval.",
         );
         assert!(
+            !(relay_config.message_mix_bernoulli.is_some()
+                && (min_sum_config.c_damp.is_some()
+                    || min_sum_config.explicit_c_damp_messages.is_some()
+                    || relay_config.explicit_c_damp_messages.is_some()
+                    || relay_config.c_damp_dist_interval.is_some())),
+            "message_mix_bernoulli cannot be combined with c_damp, explicit_c_damp_messages, or c_damp_dist_interval.",
+        );
+        assert!(
             min_sum_config.explicit_c_damp_messages.is_none(),
             "RelayDecoder expects per-leg edge damping in RelayDecoderConfig, not MinSumDecoderConfig.",
+        );
+        assert!(
+            min_sum_config
+                .explicit_message_mix_fresh_coefficients
+                .is_none()
+                && min_sum_config
+                    .explicit_message_mix_previous_coefficients
+                    .is_none(),
+            "RelayDecoder expects per-leg message-mix coefficients in RelayDecoderConfig, not MinSumDecoderConfig.",
         );
         if relay_config.logging {
             let log_line = format!(
@@ -338,7 +464,28 @@ where
     }
 
     fn apply_stage_edge_damping(&mut self, stage_idx: usize) {
-        if let Some(explicit_c_damp_messages) = self.relay_config.explicit_c_damp_messages.as_ref() {
+        if let Some(message_mix) = self.relay_config.message_mix_bernoulli {
+            self.bp_decoder.clear_explicit_c_damp_messages();
+            let mut fresh_coefficients = Array1::zeros(self.check_matrix().nnz());
+            let mut previous_coefficients = Array1::zeros(self.check_matrix().nnz());
+            for (fresh, previous) in fresh_coefficients
+                .iter_mut()
+                .zip(previous_coefficients.iter_mut())
+            {
+                let (sampled_fresh, sampled_previous) =
+                    message_mix.sample(&mut self.posterior_update_state.rng_std);
+                *fresh = sampled_fresh;
+                *previous = sampled_previous;
+            }
+            self.bp_decoder.set_explicit_message_mix_coefficients_f64(
+                fresh_coefficients,
+                previous_coefficients,
+            );
+            return;
+        }
+        self.bp_decoder.clear_explicit_message_mix_coefficients();
+        if let Some(explicit_c_damp_messages) = self.relay_config.explicit_c_damp_messages.as_ref()
+        {
             let row = explicit_c_damp_messages.row(stage_idx).to_owned();
             self.bp_decoder.set_explicit_c_damp_messages_f64(row);
             return;
@@ -832,5 +979,24 @@ mod tests {
         assert!(GammaSampler::bernoulli_two_point(0.1, 0.4, 0.5).is_err());
         assert!(GammaSampler::bernoulli_two_point(-0.1, -0.4, 0.5).is_err());
         assert!(GammaSampler::bernoulli_two_point(-0.1, 0.4, 1.5).is_err());
+    }
+
+    #[test]
+    fn message_mix_sampler_extremes_are_independent_and_deterministic() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(123);
+        let sampler = MessageMixBernoulliSampler::new(-0.2, 0.4, 1.0, -0.8, 0.1, 0.0).unwrap();
+        for _ in 0..16 {
+            assert_eq!(sampler.sample(&mut rng), (0.4, -0.8));
+        }
+    }
+
+    #[test]
+    fn message_mix_sampler_rejects_invalid_values() {
+        assert!(MessageMixBernoulliSampler::new(0.1, 0.4, 0.5, -0.1, 0.2, 0.5).is_err());
+        assert!(MessageMixBernoulliSampler::new(-0.1, -0.4, 0.5, -0.1, 0.2, 0.5).is_err());
+        assert!(MessageMixBernoulliSampler::new(-0.1, 0.4, 1.5, -0.1, 0.2, 0.5).is_err());
+        assert!(MessageMixBernoulliSampler::new(-0.1, 0.4, 0.5, 0.1, 0.2, 0.5).is_err());
+        assert!(MessageMixBernoulliSampler::new(-0.1, 0.4, 0.5, -0.1, -0.2, 0.5).is_err());
+        assert!(MessageMixBernoulliSampler::new(-0.1, 0.4, 0.5, -0.1, 0.2, 1.5).is_err());
     }
 }

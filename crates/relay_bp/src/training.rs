@@ -1,10 +1,21 @@
-use crate::bp::relay::{GammaSampler, RelayDecoderConfig, StoppingCriterion};
+use crate::bp::relay::{
+    GammaSampler, MessageMixBernoulliSampler, RelayDecoderConfig, StoppingCriterion,
+};
 use crate::bp::relayed_bpgd::{RelayedBPGDDecoder, RelayedBPGDDecoderConfig};
 use crate::decoder::{Bit, Decoder, Mod2Mul, SparseBitMatrix};
 use ndarray::{Array1, Array2, ArrayView1, Axis};
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
 use std::sync::Arc;
+
+type BernoulliProgressCallback<'a> =
+    Option<&'a mut dyn FnMut(&BernoulliTrainingProgress) -> Result<(), String>>;
+type MessageMixProgressCallback<'a> =
+    Option<&'a mut dyn FnMut(&MessageMixTrainingProgress) -> Result<(), String>>;
+type StaticDiscreteProgressCallback<'a> =
+    Option<&'a mut dyn FnMut(&StaticDiscreteTrainingProgress) -> Result<(), String>>;
+type StaticContinuousProgressCallback<'a> =
+    Option<&'a mut dyn FnMut(&StaticContinuousTrainingProgress) -> Result<(), String>>;
 
 #[derive(Clone, Debug)]
 pub struct RelayedBpgdTrainingDecoderConfig {
@@ -169,6 +180,117 @@ pub struct BernoulliTrainingProgress {
     pub generation_records: Vec<BernoulliGenerationRecord>,
     pub final_raw_mean: [f64; 3],
     pub final_raw_std: [f64; 3],
+}
+
+#[derive(Clone, Debug)]
+pub struct MessageMixCemTrainingConfig {
+    pub fresh_negative_min: f64,
+    pub fresh_negative_max: f64,
+    pub fresh_positive_min: f64,
+    pub fresh_positive_max: f64,
+    pub fresh_probability_min: f64,
+    pub fresh_probability_max: f64,
+    pub previous_negative_min: f64,
+    pub previous_negative_max: f64,
+    pub previous_positive_min: f64,
+    pub previous_positive_max: f64,
+    pub previous_probability_min: f64,
+    pub previous_probability_max: f64,
+    pub candidate_count: usize,
+    pub elite_count: usize,
+    pub generations: usize,
+    pub distribution_repeats: usize,
+    pub local_refinement_steps: usize,
+    pub initial_std: f64,
+    pub std_floor: f64,
+    pub smoothing: f64,
+    pub train_max_logical_failures: Option<usize>,
+    pub validation_max_logical_failures: Option<usize>,
+    pub seed: u64,
+}
+
+impl Default for MessageMixCemTrainingConfig {
+    fn default() -> Self {
+        Self {
+            fresh_negative_min: -1.0,
+            fresh_negative_max: 0.0,
+            fresh_positive_min: 0.0,
+            fresh_positive_max: 1.0,
+            fresh_probability_min: 1.0e-3,
+            fresh_probability_max: 1.0 - 1.0e-3,
+            previous_negative_min: -1.0,
+            previous_negative_max: 0.0,
+            previous_positive_min: 0.0,
+            previous_positive_max: 1.0,
+            previous_probability_min: 1.0e-3,
+            previous_probability_max: 1.0 - 1.0e-3,
+            candidate_count: 64,
+            elite_count: 8,
+            generations: 20,
+            distribution_repeats: 1,
+            local_refinement_steps: 3,
+            initial_std: 1.0,
+            std_floor: 0.05,
+            smoothing: 0.7,
+            train_max_logical_failures: None,
+            validation_max_logical_failures: None,
+            seed: 0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct MessageMixBernoulliParams {
+    pub fresh_negative: f64,
+    pub fresh_positive: f64,
+    pub fresh_p_positive: f64,
+    pub previous_negative: f64,
+    pub previous_positive: f64,
+    pub previous_p_positive: f64,
+}
+
+#[derive(Clone, Debug)]
+pub struct MessageMixCandidateResult {
+    pub raw_params: [f64; 6],
+    pub params: MessageMixBernoulliParams,
+    pub metrics: BernoulliEvaluationMetrics,
+}
+
+#[derive(Clone, Debug)]
+pub struct MessageMixGenerationRecord {
+    pub generation: usize,
+    pub raw_mean: [f64; 6],
+    pub raw_std: [f64; 6],
+    pub mean_params: MessageMixBernoulliParams,
+    pub best_candidate: MessageMixCandidateResult,
+}
+
+#[derive(Clone, Debug)]
+pub struct MessageMixTrainingResult {
+    pub best_candidate: MessageMixCandidateResult,
+    pub validation_metrics: BernoulliEvaluationMetrics,
+    pub generation_records: Vec<MessageMixGenerationRecord>,
+    pub final_raw_mean: [f64; 6],
+    pub final_raw_std: [f64; 6],
+}
+
+#[derive(Clone, Debug)]
+pub struct MessageMixTrainingResumeState {
+    pub completed_generations: usize,
+    pub raw_mean: [f64; 6],
+    pub raw_std: [f64; 6],
+    pub best_candidate: Option<MessageMixCandidateResult>,
+    pub generation_records: Vec<MessageMixGenerationRecord>,
+}
+
+#[derive(Clone, Debug)]
+pub struct MessageMixTrainingProgress {
+    pub completed_generations: usize,
+    pub generation_record: MessageMixGenerationRecord,
+    pub best_candidate: MessageMixCandidateResult,
+    pub generation_records: Vec<MessageMixGenerationRecord>,
+    pub final_raw_mean: [f64; 6],
+    pub final_raw_std: [f64; 6],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -383,7 +505,7 @@ pub fn train_relayed_bpgd_bernoulli_memory_with_progress(
     decoder_config: RelayedBpgdTrainingDecoderConfig,
     training_config: BernoulliCemTrainingConfig,
     resume_state: Option<BernoulliTrainingResumeState>,
-    mut progress_callback: Option<&mut dyn FnMut(&BernoulliTrainingProgress) -> Result<(), String>>,
+    mut progress_callback: BernoulliProgressCallback<'_>,
 ) -> Result<BernoulliTrainingResult, String> {
     validate_problem(&problem)?;
     validate_training_config(&training_config)?;
@@ -496,6 +618,151 @@ pub fn train_relayed_bpgd_bernoulli_memory_with_progress(
     })
 }
 
+pub fn train_relayed_bpgd_bernoulli_message_mix(
+    problem: BernoulliTrainingProblem,
+    decoder_config: RelayedBpgdTrainingDecoderConfig,
+    training_config: MessageMixCemTrainingConfig,
+) -> Result<MessageMixTrainingResult, String> {
+    train_relayed_bpgd_bernoulli_message_mix_with_progress(
+        problem,
+        decoder_config,
+        training_config,
+        None,
+        None,
+    )
+}
+
+pub fn train_relayed_bpgd_bernoulli_message_mix_with_progress(
+    problem: BernoulliTrainingProblem,
+    decoder_config: RelayedBpgdTrainingDecoderConfig,
+    training_config: MessageMixCemTrainingConfig,
+    resume_state: Option<MessageMixTrainingResumeState>,
+    mut progress_callback: MessageMixProgressCallback<'_>,
+) -> Result<MessageMixTrainingResult, String> {
+    validate_problem(&problem)?;
+    validate_message_mix_training_config(&training_config)?;
+    if decoder_config.c_damp.is_some() {
+        return Err("message-mix training cannot be combined with c_damp.".to_string());
+    }
+
+    let start_generation = resume_state
+        .as_ref()
+        .map(|state| state.completed_generations)
+        .unwrap_or(0);
+    if start_generation > training_config.generations {
+        return Err("resume completed_generations exceeds requested generations.".to_string());
+    }
+    let mut raw_mean = resume_state
+        .as_ref()
+        .map(|state| state.raw_mean)
+        .unwrap_or([0.0_f64; 6]);
+    let mut raw_std = resume_state
+        .as_ref()
+        .map(|state| state.raw_std)
+        .unwrap_or([training_config.initial_std.max(training_config.std_floor); 6]);
+    for value in raw_mean.iter().chain(raw_std.iter()) {
+        if !value.is_finite() {
+            return Err("resume raw_mean/raw_std values must be finite.".to_string());
+        }
+    }
+    for value in &mut raw_std {
+        *value = value.max(training_config.std_floor);
+    }
+    let mut generation_records = resume_state
+        .as_ref()
+        .map(|state| state.generation_records.clone())
+        .unwrap_or_default();
+    let mut best_overall: Option<MessageMixCandidateResult> =
+        resume_state.and_then(|state| state.best_candidate);
+
+    for generation in start_generation..training_config.generations {
+        let candidates = sample_message_mix_generation_candidates(
+            &raw_mean,
+            &raw_std,
+            generation,
+            &training_config,
+        );
+        let mut results = evaluate_message_mix_candidates(
+            &problem,
+            &decoder_config,
+            &training_config,
+            &candidates,
+            generation,
+            false,
+        );
+        results.sort_by(compare_message_mix_candidate_results);
+        let generation_best = results
+            .first()
+            .cloned()
+            .ok_or_else(|| "No message-mix candidates were evaluated.".to_string())?;
+        if best_overall
+            .as_ref()
+            .map(|best| is_better_message_mix_candidate(&generation_best, best))
+            .unwrap_or(true)
+        {
+            best_overall = Some(generation_best.clone());
+        }
+
+        let elite_count = training_config.elite_count.max(1).min(results.len());
+        let elites = &results[..elite_count];
+        let (elite_mean, elite_std) = fit_message_mix_elites(elites, training_config.std_floor);
+        let rho = training_config.smoothing;
+        for dim in 0..6 {
+            raw_mean[dim] = (1.0 - rho) * raw_mean[dim] + rho * elite_mean[dim];
+            raw_std[dim] =
+                ((1.0 - rho) * raw_std[dim] + rho * elite_std[dim]).max(training_config.std_floor);
+        }
+        generation_records.push(MessageMixGenerationRecord {
+            generation,
+            raw_mean,
+            raw_std,
+            mean_params: message_mix_params_from_raw(raw_mean, &training_config),
+            best_candidate: generation_best,
+        });
+        if let (Some(callback), Some(best_candidate), Some(generation_record)) = (
+            progress_callback.as_deref_mut(),
+            best_overall.as_ref(),
+            generation_records.last(),
+        ) {
+            callback(&MessageMixTrainingProgress {
+                completed_generations: generation + 1,
+                generation_record: generation_record.clone(),
+                best_candidate: best_candidate.clone(),
+                generation_records: generation_records.clone(),
+                final_raw_mean: raw_mean,
+                final_raw_std: raw_std,
+            })?;
+        }
+    }
+
+    let mut best = best_overall.ok_or_else(|| "Training produced no candidate.".to_string())?;
+    if training_config.local_refinement_steps > 0 {
+        best = refine_message_mix_candidate(
+            &problem,
+            &decoder_config,
+            &training_config,
+            best,
+            raw_std,
+        );
+    }
+    let validation_metrics = evaluate_message_mix_params(
+        &problem,
+        &decoder_config,
+        &training_config,
+        best.params,
+        training_config.seed.wrapping_add(9_000_000),
+        true,
+    );
+
+    Ok(MessageMixTrainingResult {
+        best_candidate: best,
+        validation_metrics,
+        generation_records,
+        final_raw_mean: raw_mean,
+        final_raw_std: raw_std,
+    })
+}
+
 pub fn train_relayed_bpgd_static_discrete_memory(
     problem: BernoulliTrainingProblem,
     decoder_config: RelayedBpgdTrainingDecoderConfig,
@@ -515,9 +782,7 @@ pub fn train_relayed_bpgd_static_discrete_memory_with_progress(
     decoder_config: RelayedBpgdTrainingDecoderConfig,
     training_config: StaticDiscreteMemoryTrainingConfig,
     resume_state: Option<StaticDiscreteTrainingResumeState>,
-    mut progress_callback: Option<
-        &mut dyn FnMut(&StaticDiscreteTrainingProgress) -> Result<(), String>,
-    >,
+    mut progress_callback: StaticDiscreteProgressCallback<'_>,
 ) -> Result<StaticDiscreteTrainingResult, String> {
     if training_config.optimizer == StaticMemoryOptimizer::Nes {
         return train_relayed_bpgd_static_discrete_memory_nes_with_progress(
@@ -664,9 +929,7 @@ pub fn train_relayed_bpgd_static_continuous_memory_with_progress(
     decoder_config: RelayedBpgdTrainingDecoderConfig,
     training_config: StaticContinuousMemoryTrainingConfig,
     resume_state: Option<StaticContinuousTrainingResumeState>,
-    mut progress_callback: Option<
-        &mut dyn FnMut(&StaticContinuousTrainingProgress) -> Result<(), String>,
-    >,
+    mut progress_callback: StaticContinuousProgressCallback<'_>,
 ) -> Result<StaticContinuousTrainingResult, String> {
     if training_config.optimizer == StaticMemoryOptimizer::Nes {
         return train_relayed_bpgd_static_continuous_memory_nes_with_progress(
@@ -841,9 +1104,7 @@ fn train_relayed_bpgd_static_discrete_memory_nes_with_progress(
     decoder_config: RelayedBpgdTrainingDecoderConfig,
     training_config: StaticDiscreteMemoryTrainingConfig,
     resume_state: Option<StaticDiscreteTrainingResumeState>,
-    mut progress_callback: Option<
-        &mut dyn FnMut(&StaticDiscreteTrainingProgress) -> Result<(), String>,
-    >,
+    mut progress_callback: StaticDiscreteProgressCallback<'_>,
 ) -> Result<StaticDiscreteTrainingResult, String> {
     validate_problem(&problem)?;
     validate_static_discrete_training_config(&training_config)?;
@@ -995,9 +1256,7 @@ fn train_relayed_bpgd_static_continuous_memory_nes_with_progress(
     decoder_config: RelayedBpgdTrainingDecoderConfig,
     training_config: StaticContinuousMemoryTrainingConfig,
     resume_state: Option<StaticContinuousTrainingResumeState>,
-    mut progress_callback: Option<
-        &mut dyn FnMut(&StaticContinuousTrainingProgress) -> Result<(), String>,
-    >,
+    mut progress_callback: StaticContinuousProgressCallback<'_>,
 ) -> Result<StaticContinuousTrainingResult, String> {
     validate_problem(&problem)?;
     validate_static_continuous_training_config(&training_config)?;
@@ -1333,8 +1592,8 @@ fn initial_static_discrete_probability_vector(
     }
     if let Some(mask) = config.initial_mask.as_ref() {
         validate_static_vector_len("initial_mask", mask.len(), num_variables)?;
-        let low = config.probability_floor.max(0.1).min(0.5);
-        let high = (1.0 - config.probability_floor).min(0.9).max(0.5);
+        let low = config.probability_floor.clamp(0.1, 0.5);
+        let high = (1.0 - config.probability_floor).clamp(0.5, 0.9);
         return Ok(mask.mapv(|bit| if bit != 0 { high } else { low }));
     }
     Ok(Array1::from_elem(
@@ -1475,7 +1734,7 @@ fn sample_static_discrete_nes_masks(
 }
 
 fn push_unique_static_discrete_mask(candidates: &mut Vec<Array1<Bit>>, mask: Array1<Bit>) {
-    if !candidates.iter().any(|candidate| candidate == &mask) {
+    if !candidates.contains(&mask) {
         candidates.push(mask);
     }
 }
@@ -1848,8 +2107,8 @@ fn pull_static_discrete_probabilities_toward_anchor(
     learning_rate: f64,
 ) {
     let pull = learning_rate.clamp(0.05, 0.2);
-    let low = probability_floor.max(0.05).min(0.5);
-    let high = (1.0 - probability_floor).min(0.95).max(0.5);
+    let low = probability_floor.clamp(0.05, 0.5);
+    let high = (1.0 - probability_floor).clamp(0.5, 0.95);
     for (probability, anchor_bit) in probability_vector.iter_mut().zip(anchor_mask.iter()) {
         let target = if *anchor_bit != 0 { high } else { low };
         *probability = ((1.0 - pull) * *probability + pull * target)
@@ -1993,6 +2252,7 @@ fn probability_from_logit(logit: f64) -> f64 {
     sigmoid(logit)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn evaluate_static_gammas(
     problem: &BernoulliTrainingProblem,
     decoder_config: &RelayedBpgdTrainingDecoderConfig,
@@ -2244,6 +2504,96 @@ fn validate_training_config(config: &BernoulliCemTrainingConfig) -> Result<(), S
     Ok(())
 }
 
+fn validate_message_mix_training_config(
+    config: &MessageMixCemTrainingConfig,
+) -> Result<(), String> {
+    validate_signed_bounds(
+        "fresh negative",
+        config.fresh_negative_min,
+        config.fresh_negative_max,
+    )?;
+    validate_positive_bounds(
+        "fresh positive",
+        config.fresh_positive_min,
+        config.fresh_positive_max,
+    )?;
+    validate_probability_bounds(
+        "fresh probability",
+        config.fresh_probability_min,
+        config.fresh_probability_max,
+    )?;
+    validate_signed_bounds(
+        "previous negative",
+        config.previous_negative_min,
+        config.previous_negative_max,
+    )?;
+    validate_positive_bounds(
+        "previous positive",
+        config.previous_positive_min,
+        config.previous_positive_max,
+    )?;
+    validate_probability_bounds(
+        "previous probability",
+        config.previous_probability_min,
+        config.previous_probability_max,
+    )?;
+    if config.candidate_count == 0 {
+        return Err("candidate_count must be positive.".to_string());
+    }
+    if config.elite_count == 0 {
+        return Err("elite_count must be positive.".to_string());
+    }
+    if config.generations == 0 {
+        return Err("generations must be positive.".to_string());
+    }
+    if config.initial_std <= 0.0 || !config.initial_std.is_finite() {
+        return Err("initial_std must be positive and finite.".to_string());
+    }
+    if config.std_floor <= 0.0 || !config.std_floor.is_finite() {
+        return Err("std_floor must be positive and finite.".to_string());
+    }
+    if !(0.0..=1.0).contains(&config.smoothing) || !config.smoothing.is_finite() {
+        return Err("smoothing must be finite and in [0, 1].".to_string());
+    }
+    if config.train_max_logical_failures == Some(0) {
+        return Err("train_max_logical_failures must be positive when set.".to_string());
+    }
+    if config.validation_max_logical_failures == Some(0) {
+        return Err("validation_max_logical_failures must be positive when set.".to_string());
+    }
+    Ok(())
+}
+
+fn validate_signed_bounds(label: &str, low: f64, high: f64) -> Result<(), String> {
+    if !low.is_finite() || !high.is_finite() {
+        return Err(format!("{label} bounds must be finite."));
+    }
+    if low > high || high > 0.0 {
+        return Err(format!("{label} bounds must satisfy min <= max <= 0."));
+    }
+    Ok(())
+}
+
+fn validate_positive_bounds(label: &str, low: f64, high: f64) -> Result<(), String> {
+    if !low.is_finite() || !high.is_finite() {
+        return Err(format!("{label} bounds must be finite."));
+    }
+    if low < 0.0 || low > high {
+        return Err(format!("{label} bounds must satisfy 0 <= min <= max."));
+    }
+    Ok(())
+}
+
+fn validate_probability_bounds(label: &str, low: f64, high: f64) -> Result<(), String> {
+    if !low.is_finite() || !high.is_finite() {
+        return Err(format!("{label} bounds must be finite."));
+    }
+    if low < 0.0 || high > 1.0 || low > high {
+        return Err(format!("{label} bounds must lie inside [0, 1]."));
+    }
+    Ok(())
+}
+
 fn sample_generation_candidates(
     raw_mean: &[f64; 3],
     raw_std: &[f64; 3],
@@ -2416,6 +2766,183 @@ fn build_decoder(
     )
 }
 
+fn sample_message_mix_generation_candidates(
+    raw_mean: &[f64; 6],
+    raw_std: &[f64; 6],
+    generation: usize,
+    config: &MessageMixCemTrainingConfig,
+) -> Vec<[f64; 6]> {
+    let mut candidates = Vec::with_capacity(config.candidate_count);
+    candidates.push(*raw_mean);
+    for candidate_idx in 1..config.candidate_count {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(
+            config
+                .seed
+                .wrapping_add(1_000_003 * generation as u64)
+                .wrapping_add(97_531 * candidate_idx as u64),
+        );
+        let mut raw = [0.0; 6];
+        for dim in 0..6 {
+            raw[dim] = raw_mean[dim] + raw_std[dim] * sample_standard_normal(&mut rng);
+        }
+        candidates.push(raw);
+    }
+    candidates
+}
+
+fn evaluate_message_mix_candidates(
+    problem: &BernoulliTrainingProblem,
+    decoder_config: &RelayedBpgdTrainingDecoderConfig,
+    training_config: &MessageMixCemTrainingConfig,
+    candidates: &[[f64; 6]],
+    generation: usize,
+    validation: bool,
+) -> Vec<MessageMixCandidateResult> {
+    candidates
+        .par_iter()
+        .map(|raw| {
+            let params = message_mix_params_from_raw(*raw, training_config);
+            let seed = training_config
+                .seed
+                .wrapping_add(5_000_003 * generation as u64);
+            let metrics = evaluate_message_mix_params(
+                problem,
+                decoder_config,
+                training_config,
+                params,
+                seed,
+                validation,
+            );
+            MessageMixCandidateResult {
+                raw_params: *raw,
+                params,
+                metrics,
+            }
+        })
+        .collect()
+}
+
+fn evaluate_message_mix_params(
+    problem: &BernoulliTrainingProblem,
+    decoder_config: &RelayedBpgdTrainingDecoderConfig,
+    training_config: &MessageMixCemTrainingConfig,
+    params: MessageMixBernoulliParams,
+    base_seed: u64,
+    validation: bool,
+) -> BernoulliEvaluationMetrics {
+    let detectors = if validation {
+        &problem.validation_detectors
+    } else {
+        &problem.train_detectors
+    };
+    let observables = if validation {
+        &problem.validation_observables
+    } else {
+        &problem.train_observables
+    };
+    let repeats = training_config.distribution_repeats.max(1);
+    let max_logical_failures = if validation {
+        training_config.validation_max_logical_failures
+    } else {
+        training_config.train_max_logical_failures
+    };
+    let mut logical_failures = 0usize;
+    let mut converged = 0usize;
+    let mut iterations = 0usize;
+    let mut trials = 0usize;
+    let mut stopped_early = false;
+
+    'repeat_loop: for repeat_idx in 0..repeats {
+        let repeat_seed = base_seed.wrapping_add(10_007 * repeat_idx as u64);
+        let mut decoder = build_message_mix_decoder(problem, decoder_config, params, repeat_seed);
+        for (detectors_row, truth_row) in detectors
+            .axis_iter(Axis(0))
+            .zip(observables.axis_iter(Axis(0)))
+        {
+            let decode_result = decoder.decode_detailed(detectors_row);
+            let predicted = problem.observable_matrix.mul_mod2(&decode_result.decoding);
+            if observable_mismatch(predicted.view(), truth_row) {
+                logical_failures += 1;
+            }
+            if decode_result.success {
+                converged += 1;
+            }
+            iterations += decode_result.iterations;
+            trials += 1;
+            if let Some(limit) = max_logical_failures {
+                if logical_failures >= limit {
+                    stopped_early = true;
+                    break 'repeat_loop;
+                }
+            }
+        }
+    }
+    let trials_f64 = trials.max(1) as f64;
+    BernoulliEvaluationMetrics {
+        shots: detectors.nrows(),
+        repeats,
+        trials,
+        logical_failures,
+        max_logical_failures,
+        stopped_early,
+        logical_failure_rate: logical_failures as f64 / trials_f64,
+        convergence_rate: converged as f64 / trials_f64,
+        mean_iterations: iterations as f64 / trials_f64,
+    }
+}
+
+fn build_message_mix_decoder(
+    problem: &BernoulliTrainingProblem,
+    decoder_config: &RelayedBpgdTrainingDecoderConfig,
+    params: MessageMixBernoulliParams,
+    seed: u64,
+) -> RelayedBPGDDecoder {
+    let stopping_criterion = match decoder_config.stopping_criterion {
+        StoppingCriterion::NConv { .. } => StoppingCriterion::NConv {
+            stop_after: decoder_config.stop_nconv,
+        },
+        ref other => other.clone(),
+    };
+    RelayedBPGDDecoder::new(
+        problem.check_matrix.clone(),
+        Arc::new(RelayedBPGDDecoderConfig {
+            error_priors: problem.error_priors.clone(),
+            alpha: decoder_config.alpha,
+            alpha_iteration_scaling_factor: decoder_config.alpha_iteration_scaling_factor,
+            gamma0: decoder_config.gamma0,
+            c_damp: None,
+            random_decimation_candidates: decoder_config.random_decimation_candidates,
+            relay_config: Arc::new(RelayDecoderConfig {
+                pre_iter: decoder_config.pre_iter,
+                num_sets: decoder_config.num_sets,
+                set_max_iter: decoder_config.set_max_iter,
+                message_mix_bernoulli: Some(
+                    MessageMixBernoulliSampler::new(
+                        params.fresh_negative,
+                        params.fresh_positive,
+                        params.fresh_p_positive,
+                        params.previous_negative,
+                        params.previous_positive,
+                        params.previous_p_positive,
+                    )
+                    .expect("message-mix params are bounded by training config"),
+                ),
+                relay_posteriors: decoder_config.relay_posteriors,
+                stopping_criterion,
+                seed,
+                ..Default::default()
+            }),
+            decimation_pre_iter: decoder_config.decimation_pre_iter,
+            initial_decimation_percentage: decoder_config.initial_decimation_percentage,
+            r_low: decoder_config.r_low,
+            t_low: decoder_config.t_low,
+            r_high: decoder_config.r_high,
+            t_high: decoder_config.t_high,
+            ..Default::default()
+        }),
+    )
+}
+
 fn observable_mismatch(predicted: ArrayView1<Bit>, truth: ArrayView1<Bit>) -> bool {
     predicted
         .iter()
@@ -2426,23 +2953,52 @@ fn observable_mismatch(predicted: ArrayView1<Bit>, truth: ArrayView1<Bit>) -> bo
 fn fit_elites(elites: &[BernoulliCandidateResult], std_floor: f64) -> ([f64; 3], [f64; 3]) {
     let mut mean = [0.0; 3];
     for elite in elites {
-        for dim in 0..3 {
-            mean[dim] += elite.raw_params[dim];
+        for (dim, mean_value) in mean.iter_mut().enumerate() {
+            *mean_value += elite.raw_params[dim];
         }
     }
-    for dim in 0..3 {
-        mean[dim] /= elites.len().max(1) as f64;
+    for mean_value in &mut mean {
+        *mean_value /= elites.len().max(1) as f64;
     }
     let mut variance = [0.0; 3];
     for elite in elites {
-        for dim in 0..3 {
+        for (dim, variance_value) in variance.iter_mut().enumerate() {
             let delta = elite.raw_params[dim] - mean[dim];
-            variance[dim] += delta * delta;
+            *variance_value += delta * delta;
         }
     }
     let mut std = [0.0; 3];
-    for dim in 0..3 {
-        std[dim] = (variance[dim] / elites.len().max(1) as f64)
+    for (dim, std_value) in std.iter_mut().enumerate() {
+        *std_value = (variance[dim] / elites.len().max(1) as f64)
+            .sqrt()
+            .max(std_floor);
+    }
+    (mean, std)
+}
+
+fn fit_message_mix_elites(
+    elites: &[MessageMixCandidateResult],
+    std_floor: f64,
+) -> ([f64; 6], [f64; 6]) {
+    let mut mean = [0.0; 6];
+    for elite in elites {
+        for (dim, mean_value) in mean.iter_mut().enumerate() {
+            *mean_value += elite.raw_params[dim];
+        }
+    }
+    for mean_value in &mut mean {
+        *mean_value /= elites.len().max(1) as f64;
+    }
+    let mut variance = [0.0; 6];
+    for elite in elites {
+        for (dim, variance_value) in variance.iter_mut().enumerate() {
+            let delta = elite.raw_params[dim] - mean[dim];
+            *variance_value += delta * delta;
+        }
+    }
+    let mut std = [0.0; 6];
+    for (dim, std_value) in std.iter_mut().enumerate() {
+        *std_value = (variance[dim] / elites.len().max(1) as f64)
             .sqrt()
             .max(std_floor);
     }
@@ -2490,6 +3046,47 @@ fn refine_candidate(
     best
 }
 
+fn refine_message_mix_candidate(
+    problem: &BernoulliTrainingProblem,
+    decoder_config: &RelayedBpgdTrainingDecoderConfig,
+    training_config: &MessageMixCemTrainingConfig,
+    mut best: MessageMixCandidateResult,
+    raw_std: [f64; 6],
+) -> MessageMixCandidateResult {
+    let mut radius = raw_std
+        .iter()
+        .copied()
+        .fold(training_config.std_floor, f64::max);
+    for step in 0..training_config.local_refinement_steps {
+        let mut raws = Vec::with_capacity(13);
+        raws.push(best.raw_params);
+        for dim in 0..6 {
+            let mut minus = best.raw_params;
+            minus[dim] -= radius;
+            raws.push(minus);
+            let mut plus = best.raw_params;
+            plus[dim] += radius;
+            raws.push(plus);
+        }
+        let mut results = evaluate_message_mix_candidates(
+            problem,
+            decoder_config,
+            training_config,
+            &raws,
+            training_config.generations + step,
+            false,
+        );
+        results.sort_by(compare_message_mix_candidate_results);
+        if let Some(candidate) = results.into_iter().next() {
+            if is_better_message_mix_candidate(&candidate, &best) {
+                best = candidate;
+            }
+        }
+        radius = (radius * 0.5).max(training_config.std_floor);
+    }
+    best
+}
+
 fn compare_candidate_results(
     left: &BernoulliCandidateResult,
     right: &BernoulliCandidateResult,
@@ -2507,8 +3104,59 @@ fn compare_candidate_results(
         .then_with(|| left.params.p_positive.total_cmp(&right.params.p_positive))
 }
 
+fn compare_message_mix_candidate_results(
+    left: &MessageMixCandidateResult,
+    right: &MessageMixCandidateResult,
+) -> std::cmp::Ordering {
+    left.metrics
+        .logical_failure_rate
+        .total_cmp(&right.metrics.logical_failure_rate)
+        .then_with(|| {
+            left.metrics
+                .mean_iterations
+                .total_cmp(&right.metrics.mean_iterations)
+        })
+        .then_with(|| {
+            left.params
+                .fresh_negative
+                .total_cmp(&right.params.fresh_negative)
+        })
+        .then_with(|| {
+            left.params
+                .fresh_positive
+                .total_cmp(&right.params.fresh_positive)
+        })
+        .then_with(|| {
+            left.params
+                .fresh_p_positive
+                .total_cmp(&right.params.fresh_p_positive)
+        })
+        .then_with(|| {
+            left.params
+                .previous_negative
+                .total_cmp(&right.params.previous_negative)
+        })
+        .then_with(|| {
+            left.params
+                .previous_positive
+                .total_cmp(&right.params.previous_positive)
+        })
+        .then_with(|| {
+            left.params
+                .previous_p_positive
+                .total_cmp(&right.params.previous_p_positive)
+        })
+}
+
 fn is_better_candidate(left: &BernoulliCandidateResult, right: &BernoulliCandidateResult) -> bool {
     compare_candidate_results(left, right).is_lt()
+}
+
+fn is_better_message_mix_candidate(
+    left: &MessageMixCandidateResult,
+    right: &MessageMixCandidateResult,
+) -> bool {
+    compare_message_mix_candidate_results(left, right).is_lt()
 }
 
 fn params_from_raw(raw: [f64; 3], config: &BernoulliCemTrainingConfig) -> BernoulliGammaParams {
@@ -2516,6 +3164,44 @@ fn params_from_raw(raw: [f64; 3], config: &BernoulliCemTrainingConfig) -> Bernou
         negative: bounded_sigmoid(raw[0], config.negative_min, config.negative_max),
         positive: bounded_sigmoid(raw[1], config.positive_min, config.positive_max),
         p_positive: bounded_sigmoid(raw[2], config.probability_min, config.probability_max),
+    }
+}
+
+fn message_mix_params_from_raw(
+    raw: [f64; 6],
+    config: &MessageMixCemTrainingConfig,
+) -> MessageMixBernoulliParams {
+    MessageMixBernoulliParams {
+        fresh_negative: bounded_sigmoid(
+            raw[0],
+            config.fresh_negative_min,
+            config.fresh_negative_max,
+        ),
+        fresh_positive: bounded_sigmoid(
+            raw[1],
+            config.fresh_positive_min,
+            config.fresh_positive_max,
+        ),
+        fresh_p_positive: bounded_sigmoid(
+            raw[2],
+            config.fresh_probability_min,
+            config.fresh_probability_max,
+        ),
+        previous_negative: bounded_sigmoid(
+            raw[3],
+            config.previous_negative_min,
+            config.previous_negative_max,
+        ),
+        previous_positive: bounded_sigmoid(
+            raw[4],
+            config.previous_positive_min,
+            config.previous_positive_max,
+        ),
+        previous_p_positive: bounded_sigmoid(
+            raw[5],
+            config.previous_probability_min,
+            config.previous_probability_max,
+        ),
     }
 }
 
@@ -2559,6 +3245,26 @@ mod tests {
             ..Default::default()
         };
         assert!(validate_training_config(&config).is_err());
+    }
+
+    #[test]
+    fn message_mix_params_from_raw_use_six_independent_bounds() {
+        let params = message_mix_params_from_raw([0.0; 6], &MessageMixCemTrainingConfig::default());
+        assert!(params.fresh_negative > -1.0 && params.fresh_negative < 0.0);
+        assert!(params.fresh_positive > 0.0 && params.fresh_positive < 1.0);
+        assert!(params.fresh_p_positive > 0.001 && params.fresh_p_positive < 0.999);
+        assert!(params.previous_negative > -1.0 && params.previous_negative < 0.0);
+        assert!(params.previous_positive > 0.0 && params.previous_positive < 1.0);
+        assert!(params.previous_p_positive > 0.001 && params.previous_p_positive < 0.999);
+    }
+
+    #[test]
+    fn validates_invalid_message_mix_bounds() {
+        let config = MessageMixCemTrainingConfig {
+            fresh_negative_min: 0.1,
+            ..Default::default()
+        };
+        assert!(validate_message_mix_training_config(&config).is_err());
     }
 
     #[test]

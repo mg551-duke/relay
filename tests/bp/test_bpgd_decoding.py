@@ -191,6 +191,29 @@ def test_relayed_bpgd_accepts_bernoulli_gamma_sampler(repetition_code_config):
     assert result.iterations > 0
 
 
+def test_relayed_bpgd_accepts_message_mix_without_gamma(repetition_code_config):
+    decoder = relay_bp.RelayedBPGDDecoderF64(
+        repetition_code_config["check_matrix"],
+        error_priors=repetition_code_config["error_priors"],
+        alpha=1.0,
+        gamma0=None,
+        pre_iter=2,
+        num_sets=2,
+        set_max_iter=5,
+        message_mix_bernoulli=(-1.0, 0.5, 1.0, -1.0, 0.0, 1.0),
+        decimation_pre_iter=0,
+        r_low=0,
+        r_high=0,
+        seed=3,
+    )
+
+    result = decoder.decode_detailed(np.array([1, 1], dtype=np.uint8))
+
+    assert result.extra_kind == "relayed_bpgd"
+    assert result.damping_mode == "message_mix"
+    assert all(mode == "message_mix" for mode in result.stage_damping_modes)
+
+
 def test_native_bernoulli_training_smoke(repetition_code_config):
     observable_matrix = csc_matrix(np.array([[1, 1, 1]], dtype=np.uint8))
     train_detectors = np.array([[0, 0], [1, 0], [0, 1], [1, 1]], dtype=np.uint8)
@@ -223,6 +246,46 @@ def test_native_bernoulli_training_smoke(repetition_code_config):
     assert -0.3 <= params["negative"] <= 0.0
     assert 0.0 <= params["positive"] <= 0.66
     assert 0.001 <= params["p_positive"] <= 0.999
+    assert metrics["max_logical_failures"] == 2
+    assert isinstance(metrics["stopped_early"], bool)
+    assert len(result["generation_records"]) == 2
+
+
+def test_native_message_mix_training_smoke(repetition_code_config):
+    observable_matrix = csc_matrix(np.array([[1, 1, 1]], dtype=np.uint8))
+    train_detectors = np.array([[0, 0], [1, 0], [0, 1], [1, 1]], dtype=np.uint8)
+    train_observables = np.array([[0], [1], [1], [1]], dtype=np.uint8)
+
+    result = relay_bp.train_relayed_bpgd_bernoulli_message_mix(
+        repetition_code_config["check_matrix"],
+        observable_matrix,
+        repetition_code_config["error_priors"],
+        train_detectors,
+        train_observables,
+        train_detectors,
+        train_observables,
+        alpha=1.0,
+        gamma0=None,
+        pre_iter=2,
+        num_sets=2,
+        set_max_iter=5,
+        candidate_count=4,
+        elite_count=2,
+        generations=2,
+        distribution_repeats=1,
+        local_refinement_steps=1,
+        train_max_logical_failures=2,
+        seed=5,
+    )
+
+    params = result["best_candidate"]["params"]
+    metrics = result["best_candidate"]["metrics"]
+    assert -1.0 <= params["fresh_negative"] <= 0.0
+    assert 0.0 <= params["fresh_positive"] <= 1.0
+    assert 0.001 <= params["fresh_p_positive"] <= 0.999
+    assert -1.0 <= params["previous_negative"] <= 0.0
+    assert 0.0 <= params["previous_positive"] <= 1.0
+    assert 0.001 <= params["previous_p_positive"] <= 0.999
     assert metrics["max_logical_failures"] == 2
     assert isinstance(metrics["stopped_early"], bool)
     assert len(result["generation_records"]) == 2
