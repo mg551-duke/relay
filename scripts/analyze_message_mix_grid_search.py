@@ -128,7 +128,7 @@ def main() -> None:
 def load_grid_rows(base: Path) -> tuple[pd.DataFrame, list[Path]]:
     base = base.resolve()
     if not base.exists():
-        raise FileNotFoundError(f"Grid output base does not exist: {base}")
+        raise FileNotFoundError(missing_base_message(base))
     files = grid_result_files(base)
     frames = []
     for path in files:
@@ -153,6 +153,36 @@ def load_grid_rows(base: Path) -> tuple[pd.DataFrame, list[Path]]:
     if "candidate_index" in rows.columns:
         rows["candidate_index"] = rows["candidate_index"].astype(int)
     return rows, files
+
+
+def missing_base_message(base: Path) -> str:
+    message = [f"Grid output base does not exist: {base}"]
+    parent = base.parent
+    if parent.exists():
+        matches = sorted(
+            path
+            for pattern in ("*message_mix*grid*", "*msgmix*grid*", "*grid*")
+            for path in parent.glob(pattern)
+            if path.is_dir()
+        )
+        seen = []
+        for path in matches:
+            if path not in seen:
+                seen.append(path)
+        if seen:
+            message.append("Nearby candidate directories:")
+            message.extend(f"  {path}" for path in seen[:20])
+        else:
+            message.append(
+                f"No nearby grid-like directories found under existing parent: {parent}"
+            )
+    else:
+        message.append(f"Parent directory also does not exist: {parent}")
+    message.append(
+        "Find the actual grid output with: "
+        "find examples/notebook_data -path '*/seed_*/grid_results.csv' -print"
+    )
+    return "\n".join(message)
 
 
 def grid_result_files(base: Path) -> list[Path]:
