@@ -4,9 +4,10 @@
 This is a thin wrapper around
 ``run_bivariate_bicycle144_12_12_relay_bp5_performance_cluster_Z_basis.py``.
 It selects the best ``best_params.json`` under the message-mix refinement output
-base, then runs only the no-gamma message-mix Relay-BP-5 decoder over the
-standard p sweep. The wrapped runner records mean iteration counts through the
-same detailed Relay-BP sampler used by the other BP5 performance runs.
+base, then runs the no-gamma and fixed-gamma message-mix Relay-BP-5 decoders
+over the standard p sweep. The wrapped runner records mean iteration counts
+through the same detailed Relay-BP sampler used by the other BP5 performance
+runs.
 """
 
 from __future__ import annotations
@@ -17,7 +18,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-DECODER_NAME = "relay-bp5-r601-message-mix-no-gamma"
+DECODER_NAMES = [
+    "relay-bp5-r601-message-mix-no-gamma",
+    "relay-bp5-r601-message-mix-gamma0p125",
+]
 DEFAULT_P_VALUES = "0.001,0.002,0.003,0.004,0.005"
 DEFAULT_REFINEMENT_BASE = (
     "examples/notebook_data/"
@@ -102,7 +106,7 @@ def main() -> None:
         "--message-mix-best-params-path",
         str(refinement_base),
         "--decoders",
-        DECODER_NAME,
+        *DECODER_NAMES,
         "--p-values",
         args.p_values,
         "--max-batch-size",
@@ -121,7 +125,7 @@ def main() -> None:
                 "runner": str(runner),
                 "refinement_base": str(refinement_base),
                 "output_dir": str(output_dir),
-                "decoder": DECODER_NAME,
+                "decoders": DECODER_NAMES,
                 "p_values": args.p_values,
                 "command": command,
             },

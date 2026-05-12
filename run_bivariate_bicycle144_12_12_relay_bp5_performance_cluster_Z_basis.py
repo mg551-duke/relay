@@ -100,6 +100,7 @@ STATIC_DISCRETE_DECODER_NAME = "relay-bp5-r601-static-discrete-memory"
 STATIC_CONTINUOUS_DECODER_NAME = "relay-bp5-r601-static-continuous-memory"
 STATIC_DISCRETE_TOPK_DAMP_DECODER_NAME = "relay-bp5-r601-static-discrete-top10-damp0p9"
 MESSAGE_MIX_NO_GAMMA_DECODER_NAME = "relay-bp5-r601-message-mix-no-gamma"
+MESSAGE_MIX_GAMMA0125_DECODER_NAME = "relay-bp5-r601-message-mix-gamma0p125"
 DEFAULT_DECODER_INDICES: list[int] | None = None
 DEFAULT_MAX_BATCH_SIZE = 64
 DEFAULT_STATIC_DISCRETE_ASSIGNMENT_BANK_TOP_K = 10
@@ -720,14 +721,26 @@ def build_custom_decoders(
             )
         )
     if message_mix_bernoulli is not None:
+        message_mix_no_gamma = {
+            **common,
+            "gamma0": None,
+            "message_mix_bernoulli": message_mix_bernoulli,
+            "seed": RELAY_BASE_SEED + 9,
+            "decoder_label": MESSAGE_MIX_NO_GAMMA_DECODER_NAME,
+        }
         decoders[MESSAGE_MIX_NO_GAMMA_DECODER_NAME] = RelayBPIterationSampler(
-            decoder=SinterDecoder_RelayBP(
-                **common,
-                gamma0=None,
-                message_mix_bernoulli=message_mix_bernoulli,
-                seed=RELAY_BASE_SEED + 9,
-                decoder_label=MESSAGE_MIX_NO_GAMMA_DECODER_NAME,
-            )
+            decoder=SinterDecoder_RelayBP(**message_mix_no_gamma)
+        )
+        message_mix_gamma0125 = {
+            **common,
+            "gamma0": RELAY_GAMMA0,
+            "gamma_dist_interval": (RELAY_GAMMA0, RELAY_GAMMA0),
+            "message_mix_bernoulli": message_mix_bernoulli,
+            "seed": RELAY_BASE_SEED + 10,
+            "decoder_label": MESSAGE_MIX_GAMMA0125_DECODER_NAME,
+        }
+        decoders[MESSAGE_MIX_GAMMA0125_DECODER_NAME] = RelayBPIterationSampler(
+            decoder=SinterDecoder_RelayBP(**message_mix_gamma0125)
         )
     return decoders
 
@@ -1211,6 +1224,7 @@ def main() -> None:
         default_decoder_sequence.append(STATIC_DISCRETE_TOPK_DAMP_DECODER_NAME)
     if message_mix_bernoulli is not None:
         default_decoder_sequence.append(MESSAGE_MIX_NO_GAMMA_DECODER_NAME)
+        default_decoder_sequence.append(MESSAGE_MIX_GAMMA0125_DECODER_NAME)
     decoder_sequence = args.decoders or default_decoder_sequence
     unknown = [name for name in decoder_sequence if name not in custom_decoders]
     if unknown:
