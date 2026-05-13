@@ -60,6 +60,9 @@ pub struct MessageMixBernoulliSampler {
     pub previous_negative: f64,
     pub previous_positive: f64,
     pub previous_p_positive: f64,
+    pub second_previous_negative: Option<f64>,
+    pub second_previous_positive: Option<f64>,
+    pub second_previous_p_positive: Option<f64>,
 }
 
 impl GammaSampler {
@@ -156,6 +159,36 @@ impl MessageMixBernoulliSampler {
             previous_negative,
             previous_positive,
             previous_p_positive,
+            second_previous_negative: None,
+            second_previous_positive: None,
+            second_previous_p_positive: None,
+        };
+        sampler.validate()?;
+        Ok(sampler)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_second_previous(
+        fresh_negative: f64,
+        fresh_positive: f64,
+        fresh_p_positive: f64,
+        previous_negative: f64,
+        previous_positive: f64,
+        previous_p_positive: f64,
+        second_previous_negative: f64,
+        second_previous_positive: f64,
+        second_previous_p_positive: f64,
+    ) -> Result<Self, String> {
+        let sampler = Self {
+            fresh_negative,
+            fresh_positive,
+            fresh_p_positive,
+            previous_negative,
+            previous_positive,
+            previous_p_positive,
+            second_previous_negative: Some(second_previous_negative),
+            second_previous_positive: Some(second_previous_positive),
+            second_previous_p_positive: Some(second_previous_p_positive),
         };
         sampler.validate()?;
         Ok(sampler)
@@ -174,10 +207,45 @@ impl MessageMixBernoulliSampler {
             self.previous_positive,
             self.previous_p_positive,
         )?;
+        match (
+            self.second_previous_negative,
+            self.second_previous_positive,
+            self.second_previous_p_positive,
+        ) {
+            (Some(negative), Some(positive), Some(p_positive)) => {
+                validate_signed_two_point(
+                    "second previous message-mix",
+                    negative,
+                    positive,
+                    p_positive,
+                )?;
+            }
+            (None, None, None) => {}
+            _ => {
+                return Err(
+                    "second previous message-mix Bernoulli parameters must be all present or all absent."
+                        .to_string(),
+                );
+            }
+        }
         Ok(())
     }
 
-    pub fn sample(&self, rng: &mut rand::rngs::StdRng) -> (f64, f64) {
+    pub fn has_second_previous(&self) -> bool {
+        self.second_previous_negative.is_some()
+    }
+
+    pub fn sample(&self, rng: &mut rand::rngs::StdRng) -> (f64, f64, Option<f64>) {
+        let second_previous = match (
+            self.second_previous_negative,
+            self.second_previous_positive,
+            self.second_previous_p_positive,
+        ) {
+            (Some(negative), Some(positive), Some(p_positive)) => {
+                Some(sample_signed_two_point(negative, positive, p_positive, rng))
+            }
+            _ => None,
+        };
         (
             sample_signed_two_point(
                 self.fresh_negative,
@@ -191,6 +259,7 @@ impl MessageMixBernoulliSampler {
                 self.previous_p_positive,
                 rng,
             ),
+            second_previous,
         )
     }
 }
@@ -358,6 +427,9 @@ where
                 .is_none()
                 && min_sum_config
                     .explicit_message_mix_previous_coefficients
+                    .is_none()
+                && min_sum_config
+                    .explicit_message_mix_second_previous_coefficients
                     .is_none(),
             "RelayDecoder expects per-leg message-mix coefficients in RelayDecoderConfig, not MinSumDecoderConfig.",
         );
@@ -468,19 +540,34 @@ where
             self.bp_decoder.clear_explicit_c_damp_messages();
             let mut fresh_coefficients = Array1::zeros(self.check_matrix().nnz());
             let mut previous_coefficients = Array1::zeros(self.check_matrix().nnz());
-            for (fresh, previous) in fresh_coefficients
-                .iter_mut()
-                .zip(previous_coefficients.iter_mut())
-            {
-                let (sampled_fresh, sampled_previous) =
+            let mut second_previous_coefficients = message_mix
+                .has_second_previous()
+                .then(|| Array1::zeros(self.check_matrix().nnz()));
+            for edge_idx in 0..fresh_coefficients.len() {
+                let (sampled_fresh, sampled_previous, sampled_second_previous) =
                     message_mix.sample(&mut self.posterior_update_state.rng_std);
-                *fresh = sampled_fresh;
-                *previous = sampled_previous;
+                fresh_coefficients[edge_idx] = sampled_fresh;
+                previous_coefficients[edge_idx] = sampled_previous;
+                if let (Some(coefficients), Some(sampled)) = (
+                    second_previous_coefficients.as_mut(),
+                    sampled_second_previous,
+                ) {
+                    coefficients[edge_idx] = sampled;
+                }
             }
-            self.bp_decoder.set_explicit_message_mix_coefficients_f64(
-                fresh_coefficients,
-                previous_coefficients,
-            );
+            if let Some(second_previous_coefficients) = second_previous_coefficients {
+                self.bp_decoder
+                    .set_explicit_second_order_message_mix_coefficients_f64(
+                        fresh_coefficients,
+                        previous_coefficients,
+                        second_previous_coefficients,
+                    );
+            } else {
+                self.bp_decoder.set_explicit_message_mix_coefficients_f64(
+                    fresh_coefficients,
+                    previous_coefficients,
+                );
+            }
             return;
         }
         self.bp_decoder.clear_explicit_message_mix_coefficients();
@@ -986,7 +1073,20 @@ mod tests {
         let mut rng = rand::rngs::StdRng::seed_from_u64(123);
         let sampler = MessageMixBernoulliSampler::new(-0.2, 0.4, 1.0, -0.8, 0.1, 0.0).unwrap();
         for _ in 0..16 {
-            assert_eq!(sampler.sample(&mut rng), (0.4, -0.8));
+            assert_eq!(sampler.sample(&mut rng), (0.4, -0.8, None));
+        }
+    }
+
+    #[test]
+    fn message_mix_sampler_second_previous_extremes_are_deterministic() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(123);
+        let sampler = MessageMixBernoulliSampler::with_second_previous(
+            -0.2, 0.4, 1.0, -0.8, 0.1, 0.0, -0.3, 0.2, 1.0,
+        )
+        .unwrap();
+        assert!(sampler.has_second_previous());
+        for _ in 0..16 {
+            assert_eq!(sampler.sample(&mut rng), (0.4, -0.8, Some(0.2)));
         }
     }
 
@@ -998,5 +1098,9 @@ mod tests {
         assert!(MessageMixBernoulliSampler::new(-0.1, 0.4, 0.5, 0.1, 0.2, 0.5).is_err());
         assert!(MessageMixBernoulliSampler::new(-0.1, 0.4, 0.5, -0.1, -0.2, 0.5).is_err());
         assert!(MessageMixBernoulliSampler::new(-0.1, 0.4, 0.5, -0.1, 0.2, 1.5).is_err());
+        assert!(MessageMixBernoulliSampler::with_second_previous(
+            -0.1, 0.4, 0.5, -0.1, 0.2, 0.5, 0.1, 0.2, 0.5
+        )
+        .is_err());
     }
 }

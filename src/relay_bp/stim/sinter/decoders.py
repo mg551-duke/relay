@@ -35,7 +35,18 @@ def _validate_damping_sources(
     message_mix_bernoulli: (
         tuple[float, float, float, float, float, float] | None
     ) = None,
+    message_mix_second_previous_bernoulli: (
+        tuple[float, float, float] | None
+    ) = None,
 ) -> None:
+    if (
+        message_mix_second_previous_bernoulli is not None
+        and message_mix_bernoulli is None
+    ):
+        raise ValueError(
+            f"{decoder_label} requires `message_mix_bernoulli` when "
+            "`message_mix_second_previous_bernoulli` is set."
+        )
     specified = sum(
         value is not None
         for value in (
@@ -49,7 +60,8 @@ def _validate_damping_sources(
         raise ValueError(
             f"{decoder_label} accepts at most one damping source among "
             "`c_damp`, `explicit_c_damp_messages`, `c_damp_dist_interval`, "
-            "and `message_mix_bernoulli`."
+            "`message_mix_bernoulli`, and "
+            "`message_mix_second_previous_bernoulli`."
         )
 
 
@@ -338,6 +350,9 @@ class SinterDecoder_RelayBP(SinterDecoder_BaseBP):
         message_mix_bernoulli: (
             tuple[float, float, float, float, float, float] | None
         ) = None,
+        message_mix_second_previous_bernoulli: (
+            tuple[float, float, float] | None
+        ) = None,
         relay_posteriors: bool = True,
         stop_nconv: int = 5,
         stopping_criterion: str = "nconv",
@@ -359,6 +374,9 @@ class SinterDecoder_RelayBP(SinterDecoder_BaseBP):
             explicit_c_damp_messages=explicit_c_damp_messages,
             c_damp_dist_interval=c_damp_dist_interval,
             message_mix_bernoulli=message_mix_bernoulli,
+            message_mix_second_previous_bernoulli=(
+                message_mix_second_previous_bernoulli
+            ),
         )
         self.alpha = alpha
         self.gamma0 = gamma0
@@ -378,6 +396,11 @@ class SinterDecoder_RelayBP(SinterDecoder_BaseBP):
         )
         self.message_mix_bernoulli = (
             tuple(message_mix_bernoulli) if message_mix_bernoulli is not None else None
+        )
+        self.message_mix_second_previous_bernoulli = (
+            tuple(message_mix_second_previous_bernoulli)
+            if message_mix_second_previous_bernoulli is not None
+            else None
         )
         self.relay_posteriors = relay_posteriors
         self.stop_nconv = stop_nconv
@@ -415,6 +438,9 @@ class SinterDecoder_RelayBP(SinterDecoder_BaseBP):
             explicit_c_damp_messages=self.explicit_c_damp_messages,
             c_damp_dist_interval=self.c_damp_dist_interval,
             message_mix_bernoulli=self.message_mix_bernoulli,
+            message_mix_second_previous_bernoulli=(
+                self.message_mix_second_previous_bernoulli
+            ),
             relay_posteriors=self.relay_posteriors,
             stop_nconv=self.stop_nconv,
             stopping_criterion=self.stopping_criterion,
@@ -747,6 +773,9 @@ class SinterDecoder_RelayedBPGD(SinterDecoder_BaseBP):
         message_mix_bernoulli: (
             tuple[float, float, float, float, float, float] | None
         ) = None,
+        message_mix_second_previous_bernoulli: (
+            tuple[float, float, float] | None
+        ) = None,
         relay_posteriors: bool = True,
         stop_nconv: int = 5,
         stopping_criterion: str = "nconv",
@@ -774,6 +803,9 @@ class SinterDecoder_RelayedBPGD(SinterDecoder_BaseBP):
             explicit_c_damp_messages=explicit_c_damp_messages,
             c_damp_dist_interval=c_damp_dist_interval,
             message_mix_bernoulli=message_mix_bernoulli,
+            message_mix_second_previous_bernoulli=(
+                message_mix_second_previous_bernoulli
+            ),
         )
         self.alpha = alpha
         self.gamma0 = gamma0
@@ -793,6 +825,11 @@ class SinterDecoder_RelayedBPGD(SinterDecoder_BaseBP):
         )
         self.message_mix_bernoulli = (
             tuple(message_mix_bernoulli) if message_mix_bernoulli is not None else None
+        )
+        self.message_mix_second_previous_bernoulli = (
+            tuple(message_mix_second_previous_bernoulli)
+            if message_mix_second_previous_bernoulli is not None
+            else None
         )
         self.relay_posteriors = relay_posteriors
         self.stop_nconv = stop_nconv
@@ -837,6 +874,9 @@ class SinterDecoder_RelayedBPGD(SinterDecoder_BaseBP):
             explicit_c_damp_messages=self.explicit_c_damp_messages,
             c_damp_dist_interval=self.c_damp_dist_interval,
             message_mix_bernoulli=self.message_mix_bernoulli,
+            message_mix_second_previous_bernoulli=(
+                self.message_mix_second_previous_bernoulli
+            ),
             relay_posteriors=self.relay_posteriors,
             stop_nconv=self.stop_nconv,
             stopping_criterion=self.stopping_criterion,
@@ -945,6 +985,9 @@ def decoder_from_spec(spec: dict[str, Any], **decoder_kwargs: Any) -> Decoder:
                 ),
                 "c_damp_dist_interval": params.get("c_damp_dist_interval", None),
                 "message_mix_bernoulli": params.get("message_mix_bernoulli", None),
+                "message_mix_second_previous_bernoulli": params.get(
+                    "message_mix_second_previous_bernoulli", None
+                ),
                 "relay_posteriors": bool(params.get("relay_posteriors", True)),
                 "stop_nconv": int(params.get("stop_nconv", 5)),
                 "stopping_criterion": str(params.get("stopping_criterion", "nconv")),
@@ -1053,6 +1096,9 @@ def sinter_decoders(**decoder_kwargs: dict) -> dict[str, Decoder]:
         "explicit_c_damp_messages": specific.get("explicit_c_damp_messages", None),
         "c_damp_dist_interval": specific.get("c_damp_dist_interval", None),
         "message_mix_bernoulli": specific.get("message_mix_bernoulli", None),
+        "message_mix_second_previous_bernoulli": specific.get(
+            "message_mix_second_previous_bernoulli", None
+        ),
         "relay_posteriors": bool(specific.get("relay_posteriors", True)),
         "stop_nconv": int(specific.get("stop_nconv", 5)),
         "stopping_criterion": str(specific.get("stopping_criterion", "nconv")),
@@ -1123,6 +1169,9 @@ def sinter_decoders(**decoder_kwargs: dict) -> dict[str, Decoder]:
             gamma_bernoulli=relay_kwargs["gamma_bernoulli"],
             explicit_gammas=relay_kwargs["explicit_gammas"],
             message_mix_bernoulli=relay_kwargs["message_mix_bernoulli"],
+            message_mix_second_previous_bernoulli=relay_kwargs[
+                "message_mix_second_previous_bernoulli"
+            ],
             stop_nconv=relay_kwargs["stop_nconv"],
             stopping_criterion=relay_kwargs["stopping_criterion"],
             logging=relay_kwargs["logging"],

@@ -44,6 +44,7 @@ impl RelayedBPGDDecoderF64 {
         explicit_c_damp_messages=None,
         c_damp_dist_interval=None,
         message_mix_bernoulli=None,
+        message_mix_second_previous_bernoulli=None,
         relay_posteriors=true,
         stop_nconv=5,
         stopping_criterion="nconv".to_string(),
@@ -76,6 +77,7 @@ impl RelayedBPGDDecoderF64 {
         explicit_c_damp_messages: Option<&Bound<'_, PyArray2<f64>>>,
         c_damp_dist_interval: Option<(f64, f64)>,
         message_mix_bernoulli: Option<(f64, f64, f64, f64, f64, f64)>,
+        message_mix_second_previous_bernoulli: Option<(f64, f64, f64)>,
         relay_posteriors: bool,
         stop_nconv: usize,
         stopping_criterion: String,
@@ -95,6 +97,7 @@ impl RelayedBPGDDecoderF64 {
             explicit_c_damp_messages.is_some(),
             c_damp_dist_interval,
             message_mix_bernoulli.is_some(),
+            message_mix_second_previous_bernoulli.is_some(),
         )?;
 
         let stopping_criterion = match stopping_criterion.as_str() {
@@ -116,7 +119,10 @@ impl RelayedBPGDDecoderF64 {
             explicit_c_damp_messages: explicit_c_damp_messages
                 .map(|messages| unsafe { messages.as_array() }.to_owned()),
             c_damp_dist_interval,
-            message_mix_bernoulli: message_mix_sampler_from_args(message_mix_bernoulli)?,
+            message_mix_bernoulli: message_mix_sampler_from_args(
+                message_mix_bernoulli,
+                message_mix_second_previous_bernoulli,
+            )?,
             relay_posteriors,
             stopping_criterion,
             logging,
@@ -218,7 +224,13 @@ fn validate_damping_args(
     has_explicit_c_damp_messages: bool,
     c_damp_dist_interval: Option<(f64, f64)>,
     has_message_mix_bernoulli: bool,
+    has_message_mix_second_previous_bernoulli: bool,
 ) -> PyResult<()> {
+    if has_message_mix_second_previous_bernoulli && !has_message_mix_bernoulli {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "message_mix_second_previous_bernoulli requires message_mix_bernoulli.",
+        ));
+    }
     let specified = (c_damp.is_some() as usize)
         + (has_explicit_c_damp_messages as usize)
         + (c_damp_dist_interval.is_some() as usize)
@@ -240,16 +252,43 @@ fn validate_damping_args(
 
 fn message_mix_sampler_from_args(
     message_mix_bernoulli: Option<(f64, f64, f64, f64, f64, f64)>,
+    message_mix_second_previous_bernoulli: Option<(f64, f64, f64)>,
 ) -> PyResult<Option<MessageMixBernoulliSampler>> {
-    match message_mix_bernoulli {
-        Some((
+    match (message_mix_bernoulli, message_mix_second_previous_bernoulli) {
+        (
+            Some((
+                fresh_negative,
+                fresh_positive,
+                fresh_p_positive,
+                previous_negative,
+                previous_positive,
+                previous_p_positive,
+            )),
+            Some((second_previous_negative, second_previous_positive, second_previous_p_positive)),
+        ) => MessageMixBernoulliSampler::with_second_previous(
             fresh_negative,
             fresh_positive,
             fresh_p_positive,
             previous_negative,
             previous_positive,
             previous_p_positive,
-        )) => MessageMixBernoulliSampler::new(
+            second_previous_negative,
+            second_previous_positive,
+            second_previous_p_positive,
+        )
+        .map(Some)
+        .map_err(pyo3::exceptions::PyValueError::new_err),
+        (
+            Some((
+                fresh_negative,
+                fresh_positive,
+                fresh_p_positive,
+                previous_negative,
+                previous_positive,
+                previous_p_positive,
+            )),
+            None,
+        ) => MessageMixBernoulliSampler::new(
             fresh_negative,
             fresh_positive,
             fresh_p_positive,
@@ -259,6 +298,9 @@ fn message_mix_sampler_from_args(
         )
         .map(Some)
         .map_err(pyo3::exceptions::PyValueError::new_err),
-        None => Ok(None),
+        (None, Some(_)) => Err(pyo3::exceptions::PyValueError::new_err(
+            "message_mix_second_previous_bernoulli requires message_mix_bernoulli.",
+        )),
+        (None, None) => Ok(None),
     }
 }

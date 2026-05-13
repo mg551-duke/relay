@@ -149,6 +149,7 @@ impl RelayedBPGDDecoder {
                 explicit_c_damp_messages: None,
                 explicit_message_mix_fresh_coefficients: None,
                 explicit_message_mix_previous_coefficients: None,
+                explicit_message_mix_second_previous_coefficients: None,
                 explicit_edge_message_weights: config.explicit_edge_message_weights.clone(),
                 gamma0: config.gamma0,
                 data_scale_value: None,
@@ -186,19 +187,34 @@ impl RelayedBPGDDecoder {
             self.bp_decoder.clear_explicit_c_damp_messages();
             let mut fresh_coefficients = Array1::zeros(self.check_matrix.nnz());
             let mut previous_coefficients = Array1::zeros(self.check_matrix.nnz());
-            for (fresh, previous) in fresh_coefficients
-                .iter_mut()
-                .zip(previous_coefficients.iter_mut())
-            {
-                let (sampled_fresh, sampled_previous) =
+            let mut second_previous_coefficients = message_mix
+                .has_second_previous()
+                .then(|| Array1::zeros(self.check_matrix.nnz()));
+            for edge_idx in 0..fresh_coefficients.len() {
+                let (sampled_fresh, sampled_previous, sampled_second_previous) =
                     message_mix.sample(&mut self.posterior_update_state.rng_std);
-                *fresh = sampled_fresh;
-                *previous = sampled_previous;
+                fresh_coefficients[edge_idx] = sampled_fresh;
+                previous_coefficients[edge_idx] = sampled_previous;
+                if let (Some(coefficients), Some(sampled)) = (
+                    second_previous_coefficients.as_mut(),
+                    sampled_second_previous,
+                ) {
+                    coefficients[edge_idx] = sampled;
+                }
             }
-            self.bp_decoder.set_explicit_message_mix_coefficients_f64(
-                fresh_coefficients,
-                previous_coefficients,
-            );
+            if let Some(second_previous_coefficients) = second_previous_coefficients {
+                self.bp_decoder
+                    .set_explicit_second_order_message_mix_coefficients_f64(
+                        fresh_coefficients,
+                        previous_coefficients,
+                        second_previous_coefficients,
+                    );
+            } else {
+                self.bp_decoder.set_explicit_message_mix_coefficients_f64(
+                    fresh_coefficients,
+                    previous_coefficients,
+                );
+            }
             return;
         }
         self.bp_decoder.clear_explicit_message_mix_coefficients();

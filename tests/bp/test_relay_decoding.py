@@ -157,6 +157,26 @@ def test_message_mix_bernoulli_is_applied_like_fresh_scaling(repetition_code_con
     np.testing.assert_allclose(mixed.posterior_ratios, reference.posterior_ratios)
 
 
+def test_message_mix_second_previous_bernoulli_is_accepted(repetition_code_config):
+    repetition_code_config.pop("max_iter", None)
+
+    result = relay_bp.RelayDecoderF64(
+        **repetition_code_config,
+        pre_iter=2,
+        num_sets=0,
+        set_max_iter=1,
+        gamma0=None,
+        message_mix_bernoulli=(-1.0, 0.5, 1.0, -1.0, 0.0, 1.0),
+        message_mix_second_previous_bernoulli=(-1.0, 0.25, 1.0),
+        stopping_criterion="pre_iter",
+        seed=11,
+    ).decode_detailed(np.array([1, 1], dtype=np.uint8))
+
+    assert result.damping_mode == "message_mix"
+    assert result.damping_min == pytest.approx(0.0)
+    assert result.damping_max == pytest.approx(0.5)
+
+
 def test_message_mix_rejects_existing_damping_sources(repetition_code_config):
     repetition_code_config.pop("max_iter", None)
     message_mix = (-1.0, 0.5, 1.0, -1.0, 0.0, 1.0)
@@ -174,4 +194,10 @@ def test_message_mix_rejects_existing_damping_sources(repetition_code_config):
             **repetition_code_config,
             explicit_c_damp_messages=explicit,
             message_mix_bernoulli=message_mix,
+        )
+
+    with pytest.raises(ValueError, match="message_mix_second_previous_bernoulli"):
+        relay_bp.RelayDecoderF64(
+            **repetition_code_config,
+            message_mix_second_previous_bernoulli=(-1.0, 0.25, 1.0),
         )

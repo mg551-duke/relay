@@ -180,10 +180,12 @@ def load_static_gammas(
 def load_message_mix_best_params(
     path: Path | None,
 ) -> tuple[
-    tuple[float, float, float, float, float, float] | None, dict[str, Any] | None
+    tuple[float, float, float, float, float, float] | None,
+    tuple[float, float, float] | None,
+    dict[str, Any] | None,
 ]:
     if path is None:
-        return None, None
+        return None, None, None
     resolved = path.resolve()
     if not resolved.exists():
         raise FileNotFoundError(f"Message-mix params path does not exist: {resolved}")
@@ -204,9 +206,32 @@ def load_message_mix_best_params(
         "previous_positive",
         "previous_p_positive",
     ]
-    values = tuple(float(params_payload[name]) for name in names)
+    if "message_mix_bernoulli" in params_payload:
+        values = tuple(float(value) for value in params_payload["message_mix_bernoulli"])
+    else:
+        values = tuple(float(params_payload[name]) for name in names)
+    second_previous_names = [
+        "second_previous_negative",
+        "second_previous_positive",
+        "second_previous_p_positive",
+    ]
+    if "message_mix_second_previous_bernoulli" in params_payload:
+        second_previous_values = tuple(
+            float(value)
+            for value in params_payload["message_mix_second_previous_bernoulli"]
+        )
+    elif all(name in params_payload for name in second_previous_names):
+        second_previous_values = tuple(
+            float(params_payload[name]) for name in second_previous_names
+        )
+    else:
+        second_previous_values = None
     if not all(np.isfinite(values)):
         raise ValueError(f"Message-mix params contain non-finite values: {best_path}")
+    if second_previous_values is not None and not all(np.isfinite(second_previous_values)):
+        raise ValueError(
+            f"Second-previous message-mix params contain non-finite values: {best_path}"
+        )
     metadata = {
         "path": str(best_path),
         "source": str(resolved),
@@ -216,7 +241,11 @@ def load_message_mix_best_params(
     metrics = payload.get("metrics")
     if isinstance(metrics, dict):
         metadata["metrics"] = metrics
-    return values, metadata
+    if second_previous_values is not None:
+        metadata["message_mix_second_previous_bernoulli"] = list(
+            second_previous_values
+        )
+    return values, second_previous_values, metadata
 
 
 def resolve_message_mix_best_params_path(path: Path) -> Path:
@@ -626,6 +655,7 @@ def build_custom_decoders(
     message_mix_bernoulli: (
         tuple[float, float, float, float, float, float] | None
     ) = None,
+    message_mix_second_previous_bernoulli: tuple[float, float, float] | None = None,
 ) -> dict[str, Sampler]:
     common = dict(
         alpha=RELAY_ALPHA,
@@ -725,6 +755,9 @@ def build_custom_decoders(
             **common,
             "gamma0": None,
             "message_mix_bernoulli": message_mix_bernoulli,
+            "message_mix_second_previous_bernoulli": (
+                message_mix_second_previous_bernoulli
+            ),
             "seed": RELAY_BASE_SEED + 9,
             "decoder_label": MESSAGE_MIX_NO_GAMMA_DECODER_NAME,
         }
@@ -736,6 +769,9 @@ def build_custom_decoders(
             "gamma0": RELAY_GAMMA0,
             "gamma_dist_interval": (RELAY_GAMMA0, RELAY_GAMMA0),
             "message_mix_bernoulli": message_mix_bernoulli,
+            "message_mix_second_previous_bernoulli": (
+                message_mix_second_previous_bernoulli
+            ),
             "seed": RELAY_BASE_SEED + 10,
             "decoder_label": MESSAGE_MIX_GAMMA0125_DECODER_NAME,
         }
@@ -1205,15 +1241,20 @@ def main() -> None:
         args.static_discrete_assignment_bank_base,
         top_k=args.static_discrete_assignment_bank_top_k,
     )
-    message_mix_bernoulli, message_mix_metadata = load_message_mix_best_params(
-        args.message_mix_best_params_path
-    )
+    (
+        message_mix_bernoulli,
+        message_mix_second_previous_bernoulli,
+        message_mix_metadata,
+    ) = load_message_mix_best_params(args.message_mix_best_params_path)
 
     custom_decoders = build_custom_decoders(
         static_discrete_gammas=static_discrete_gammas,
         static_continuous_gammas=static_continuous_gammas,
         static_discrete_assignment_bank=static_discrete_assignment_bank,
         message_mix_bernoulli=message_mix_bernoulli,
+        message_mix_second_previous_bernoulli=(
+            message_mix_second_previous_bernoulli
+        ),
     )
     default_decoder_sequence = list(DEFAULT_DECODER_SEQUENCE)
     if static_discrete_gammas is not None:

@@ -42,6 +42,7 @@ fn build_min_sum_config(
             .map(|values| unsafe { values.as_array() }.to_owned()),
         explicit_message_mix_fresh_coefficients: None,
         explicit_message_mix_previous_coefficients: None,
+        explicit_message_mix_second_previous_coefficients: None,
         explicit_edge_message_weights: explicit_edge_message_weights
             .map(|values| unsafe { values.as_array() }.to_owned()),
         gamma0,
@@ -246,6 +247,20 @@ impl MinSumBPDecoderTraceF64 {
             .set_explicit_message_mix_coefficients_f64(
                 fresh_coefficients.as_array().to_owned(),
                 previous_coefficients.as_array().to_owned(),
+            );
+    }
+
+    pub fn set_explicit_second_order_message_mix_coefficients(
+        &mut self,
+        fresh_coefficients: PyReadonlyArray1<'_, f64>,
+        previous_coefficients: PyReadonlyArray1<'_, f64>,
+        second_previous_coefficients: PyReadonlyArray1<'_, f64>,
+    ) {
+        self.inner_decoder
+            .set_explicit_second_order_message_mix_coefficients_f64(
+                fresh_coefficients.as_array().to_owned(),
+                previous_coefficients.as_array().to_owned(),
+                second_previous_coefficients.as_array().to_owned(),
             );
     }
 

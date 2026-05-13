@@ -214,6 +214,30 @@ def test_relayed_bpgd_accepts_message_mix_without_gamma(repetition_code_config):
     assert all(mode == "message_mix" for mode in result.stage_damping_modes)
 
 
+def test_relayed_bpgd_accepts_second_previous_message_mix(repetition_code_config):
+    decoder = relay_bp.RelayedBPGDDecoderF64(
+        repetition_code_config["check_matrix"],
+        error_priors=repetition_code_config["error_priors"],
+        alpha=1.0,
+        gamma0=None,
+        pre_iter=2,
+        num_sets=2,
+        set_max_iter=5,
+        message_mix_bernoulli=(-1.0, 0.5, 1.0, -1.0, 0.0, 1.0),
+        message_mix_second_previous_bernoulli=(-1.0, 0.25, 1.0),
+        decimation_pre_iter=0,
+        r_low=0,
+        r_high=0,
+        seed=3,
+    )
+
+    result = decoder.decode_detailed(np.array([1, 1], dtype=np.uint8))
+
+    assert result.extra_kind == "relayed_bpgd"
+    assert result.damping_mode == "message_mix"
+    assert all(mode == "message_mix" for mode in result.stage_damping_modes)
+
+
 def test_native_bernoulli_training_smoke(repetition_code_config):
     observable_matrix = csc_matrix(np.array([[1, 1, 1]], dtype=np.uint8))
     train_detectors = np.array([[0, 0], [1, 0], [0, 1], [1, 1]], dtype=np.uint8)

@@ -54,6 +54,7 @@ impl MinSumBPDecoderFixed {
                 .map(|values| unsafe { values.as_array() }.to_owned()),
             explicit_message_mix_fresh_coefficients: None,
             explicit_message_mix_previous_coefficients: None,
+            explicit_message_mix_second_previous_coefficients: None,
             explicit_edge_message_weights: None,
             gamma0,
             data_scale_value,
