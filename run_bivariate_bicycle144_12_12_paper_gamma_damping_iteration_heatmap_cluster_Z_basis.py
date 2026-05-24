@@ -66,7 +66,6 @@ from run_bivariate_bicycle144_12_12_paper_iteration_heatmap_cluster_Z_basis impo
     samples_to_df,
 )
 
-
 PAPER_URL = "https://arxiv.org/abs/2506.01779"
 DEFAULT_SELECTED_P = 0.003
 DEFAULT_MEMORY_BASIS = "Z"
@@ -95,6 +94,7 @@ DEFAULT_WIDTH_COUNT = 11
 DEFAULT_TARGET_LOGICAL_ERRORS = 10
 DEFAULT_MAX_SHOTS_PER_POINT = 500_000
 DEFAULT_BASE_RELAY_SEED = 0
+ZERO_WIDTH_DAMP_EPS = 1e-12
 
 
 def logical_error_lognorm(
@@ -119,7 +119,9 @@ def logical_error_lognorm(
     return display_values, LogNorm(vmin=vmin, vmax=vmax)
 
 
-def positive_lognorm(values: np.ndarray, *, floor: float = 1.0) -> tuple[np.ndarray, LogNorm]:
+def positive_lognorm(
+    values: np.ndarray, *, floor: float = 1.0
+) -> tuple[np.ndarray, LogNorm]:
     display_values = np.asarray(values, dtype=np.float64).copy()
     finite_mask = np.isfinite(display_values)
     positive_mask = finite_mask & (display_values > 0.0)
@@ -135,6 +137,19 @@ def positive_lognorm(values: np.ndarray, *, floor: float = 1.0) -> tuple[np.ndar
     if vmax <= vmin:
         vmax = vmin * 1.01
     return display_values, LogNorm(vmin=vmin, vmax=vmax)
+
+
+def tiny_interval_around(
+    center: float, *, eps: float = ZERO_WIDTH_DAMP_EPS
+) -> tuple[float, float]:
+    half_eps = float(eps) / 2.0
+    low = max(0.0, float(center) - half_eps)
+    high = min(1.0, float(center) + half_eps)
+    if not high > low:
+        if float(center) <= 0.0:
+            return 0.0, min(1.0, float(eps))
+        return max(0.0, float(center) - float(eps)), float(center)
+    return low, high
 
 
 def interval_from_center_width(center: float, width: float) -> tuple[float, float]:
@@ -218,18 +233,14 @@ def build_point_decoder(
     stop_nconv: int,
     details_dir: Path | None = None,
 ) -> SinterDecoder_RelayBP:
-    explicit_c_damp_messages = None
     c_damp_dist_interval: tuple[float, float] | None = (
         float(point["interval_low"]),
         float(point["interval_high"]),
     )
     if math.isclose(float(point["effective_width"]), 0.0, abs_tol=1e-12):
-        explicit_c_damp_messages = np.full(
-            (num_sets + 1, num_edges),
-            float(point["effective_center"]),
-            dtype=np.float64,
-        )
-        c_damp_dist_interval = None
+        # Avoid allocating a full (num_sets + 1, nnz) damping matrix for a
+        # degenerate width-zero point; a tiny interval is effectively fixed.
+        c_damp_dist_interval = tiny_interval_around(float(point["effective_center"]))
 
     return SinterDecoder_RelayBP(
         alpha=alpha,
@@ -239,7 +250,7 @@ def build_point_decoder(
         set_max_iter=set_max_iter,
         gamma_dist_interval=(PAPER_RELAY_GAMMA_LOW, PAPER_RELAY_GAMMA_HIGH),
         explicit_gammas=None,
-        explicit_c_damp_messages=explicit_c_damp_messages,
+        explicit_c_damp_messages=None,
         c_damp_dist_interval=c_damp_dist_interval,
         relay_posteriors=relay_posteriors,
         stop_nconv=stop_nconv,
@@ -317,9 +328,7 @@ def build_setup_dict(
         "reference_interval_center": float(reference_center),
         "reference_interval_width": float(reference_width),
         "damping_interval_handling": (
-            "clip_to_[0,1]"
-            if allow_clipped_intervals
-            else "skip_clipped_points"
+            "clip_to_[0,1]" if allow_clipped_intervals else "skip_clipped_points"
         ),
         "num_detectors": int(num_detectors),
         "num_observables": int(num_observables),
@@ -545,7 +554,9 @@ def plot_damping_heatmap(
             else "requested intervals leaving [0, 1] are skipped"
         )
     )
-    ax.text(0.0, 1.02, subtitle, transform=ax.transAxes, ha="left", va="bottom", fontsize=10)
+    ax.text(
+        0.0, 1.02, subtitle, transform=ax.transAxes, ha="left", va="bottom", fontsize=10
+    )
     colorbar = fig.colorbar(mesh, ax=ax, fraction=0.046, pad=0.04)
     colorbar.set_label("logical error rate")
     ax.legend(loc="upper right")
@@ -671,7 +682,9 @@ def save_outputs(
 ) -> None:
     grid_csv = output_dir / f"{save_stem}_grid.csv"
     best_csv = output_dir / f"{save_stem}_best_points.csv"
-    reference_point_csv = output_dir / f"{save_stem}_reference_interval_nearest_point.csv"
+    reference_point_csv = (
+        output_dir / f"{save_stem}_reference_interval_nearest_point.csv"
+    )
     artifact_npz = output_dir / f"{save_stem}_artifact.npz"
     plots_dir = output_dir / "plots"
     main_plot_png = plots_dir / "paper_style_logical_error_heatmap.png"
@@ -688,10 +701,9 @@ def save_outputs(
         reference_interval_low,
         reference_interval_high,
     )
-    reference_dist2 = (
-        (summary_df["center"] - reference_center) ** 2
-        + (summary_df["width"] - reference_width) ** 2
-    )
+    reference_dist2 = (summary_df["center"] - reference_center) ** 2 + (
+        summary_df["width"] - reference_width
+    ) ** 2
     nearest_reference_point = summary_df.loc[[int(reference_dist2.idxmin())]].copy()
     nearest_reference_point.insert(0, "reference_interval_center", reference_center)
     nearest_reference_point.insert(1, "reference_interval_width", reference_width)
@@ -773,8 +785,12 @@ def parse_args() -> argparse.Namespace:
         help="Enable sinter progress output.",
     )
     parser.add_argument("--p", type=float, default=DEFAULT_SELECTED_P)
-    parser.add_argument("--memory-basis", choices=["X", "Z"], default=DEFAULT_MEMORY_BASIS)
-    parser.add_argument("--basis-filter", choices=["X", "Z"], default=DEFAULT_BASIS_FILTER)
+    parser.add_argument(
+        "--memory-basis", choices=["X", "Z"], default=DEFAULT_MEMORY_BASIS
+    )
+    parser.add_argument(
+        "--basis-filter", choices=["X", "Z"], default=DEFAULT_BASIS_FILTER
+    )
     parser.add_argument("--alpha", type=float, default=PAPER_ALPHA)
     parser.add_argument("--gamma0", type=float, default=PAPER_GAMMA0)
     parser.add_argument("--pre-iter", type=int, default=PAPER_PRE_ITER)
@@ -814,8 +830,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--width-min", type=float, default=DEFAULT_WIDTH_MIN)
     parser.add_argument("--width-max", type=float, default=DEFAULT_WIDTH_MAX)
     parser.add_argument("--width-count", type=int, default=DEFAULT_WIDTH_COUNT)
-    parser.add_argument("--target-logical-errors", type=int, default=DEFAULT_TARGET_LOGICAL_ERRORS)
-    parser.add_argument("--max-shots-per-point", type=int, default=DEFAULT_MAX_SHOTS_PER_POINT)
+    parser.add_argument(
+        "--target-logical-errors", type=int, default=DEFAULT_TARGET_LOGICAL_ERRORS
+    )
+    parser.add_argument(
+        "--max-shots-per-point", type=int, default=DEFAULT_MAX_SHOTS_PER_POINT
+    )
     parser.add_argument("--base-relay-seed", type=int, default=DEFAULT_BASE_RELAY_SEED)
     return parser.parse_args()
 
@@ -823,7 +843,11 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    repo_root = args.repo_root.resolve() if args.repo_root else find_repo_root(Path.cwd().resolve())
+    repo_root = (
+        args.repo_root.resolve()
+        if args.repo_root
+        else find_repo_root(Path.cwd().resolve())
+    )
     circuits_dir = repo_root / "tests" / "testdata" / "bicycle_bivariate"
     save_stem = "bicycle_bivariate_144_12_12_paper_gamma_damping_iteration_heatmap_cluster_Z_basis"
     output_dir = (
@@ -839,7 +863,9 @@ def main() -> None:
     summary_csv = output_dir / f"{save_stem}_summary.csv"
     grid_csv = output_dir / f"{save_stem}_grid.csv"
     best_csv = output_dir / f"{save_stem}_best_points.csv"
-    reference_point_csv = output_dir / f"{save_stem}_reference_interval_nearest_point.csv"
+    reference_point_csv = (
+        output_dir / f"{save_stem}_reference_interval_nearest_point.csv"
+    )
     artifact_npz = output_dir / f"{save_stem}_artifact.npz"
     setup_json = output_dir / f"{save_stem}_setup.json"
     selected_circuit_csv = output_dir / "selected_circuit.csv"
@@ -890,7 +916,9 @@ def main() -> None:
     if args.max_shots_per_point <= 0:
         raise ValueError("--max-shots-per-point must be positive.")
     if args.reference_interval_high < args.reference_interval_low:
-        raise ValueError("--reference-interval-high must be >= --reference-interval-low.")
+        raise ValueError(
+            "--reference-interval-high must be >= --reference-interval-low."
+        )
 
     stim_path = find_circuit_path(circuits_dir, args.p, args.memory_basis)
     problem = load_filtered_problem(stim_path=stim_path, basis_filter=args.basis_filter)
@@ -955,7 +983,9 @@ def main() -> None:
         allow_clipped_intervals=args.allow_clipped_intervals,
     )
     validate_resume_setup(setup_json, current_setup)
-    setup_json.write_text(json.dumps(current_setup, indent=2, sort_keys=True), encoding="utf-8")
+    setup_json.write_text(
+        json.dumps(current_setup, indent=2, sort_keys=True), encoding="utf-8"
+    )
 
     initial_samples = load_samples_from_resume(resume_csv)
     initial_summary_df = samples_to_df_with_point_metadata(

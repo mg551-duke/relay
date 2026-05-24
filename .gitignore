@@ -182,6 +182,15 @@ export
 
 */.jupyter_ystore.db
 
+# Local scratch/output state
+.tmp/
+examples/.tmp/
+pytest-cache-files-*/
+tmpd*/
+tmp_python_io/
+tmp_sinter_env/
+.~lock.*#
+
 
 # Rust Gitignore
 # This file should only ignore things that are generated during a `x.py` build,

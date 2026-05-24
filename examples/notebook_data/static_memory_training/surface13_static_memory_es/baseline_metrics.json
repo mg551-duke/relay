@@ -1,0 +1,42 @@
+{
+  "half_validation": {
+    "bp": {
+      "convergence_rate": 0.8333333333333334,
+      "exact_recovery_rate": 0.0,
+      "logical_success_rate": 1.0,
+      "loss_mean": 0.18791666666666665,
+      "mean_iterations": 8.5,
+      "mean_logical_weight": 0.0,
+      "num_cases": 6
+    },
+    "same_memory": {
+      "convergence_rate": 0.8333333333333334,
+      "exact_recovery_rate": 0.0,
+      "logical_success_rate": 1.0,
+      "loss_mean": 0.18791666666666665,
+      "mean_iterations": 8.5,
+      "mean_logical_weight": 0.0,
+      "num_cases": 6
+    }
+  },
+  "random_validation": {
+    "bp": {
+      "convergence_rate": 0.0,
+      "exact_recovery_rate": 0.0,
+      "logical_success_rate": 0.875,
+      "loss_mean": 1.5500000000000003,
+      "mean_iterations": 20.0,
+      "mean_logical_weight": 0.125,
+      "num_cases": 8
+    },
+    "same_memory": {
+      "convergence_rate": 0.0,
+      "exact_recovery_rate": 0.0,
+      "logical_success_rate": 0.875,
+      "loss_mean": 1.5500000000000003,
+      "mean_iterations": 20.0,
+      "mean_logical_weight": 0.125,
+      "num_cases": 8
+    }
+  }
+}

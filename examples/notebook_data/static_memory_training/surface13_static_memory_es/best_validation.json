@@ -1,0 +1,22 @@
+{
+  "half_validation_bp_logical_success_rate": 1.0,
+  "half_validation_convergence_rate": 0.8333333333333334,
+  "half_validation_exact_recovery_rate": 0.0,
+  "half_validation_logical_success_rate": 1.0,
+  "half_validation_loss_mean": 0.18791666666666665,
+  "half_validation_mean_iterations": 8.5,
+  "half_validation_mean_logical_weight": 0.0,
+  "half_validation_same_mem_logical_success_rate": 1.0,
+  "hard_replay_pool_size": 0,
+  "phase": "warmup_half_stabilizer",
+  "random_validation_bp_logical_success_rate": 0.875,
+  "random_validation_convergence_rate": 0.0,
+  "random_validation_exact_recovery_rate": 0.0,
+  "random_validation_logical_success_rate": 0.875,
+  "random_validation_loss_mean": 1.5500000000000003,
+  "random_validation_mean_iterations": 20.0,
+  "random_validation_mean_logical_weight": 0.125,
+  "random_validation_same_mem_logical_success_rate": 0.875,
+  "selection_loss": 1.6909375000000002,
+  "step": 1
+}

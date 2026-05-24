@@ -3,9 +3,9 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --partition=common
-#SBATCH --cpus-per-task=32
-#SBATCH --mem=8G
-#SBATCH --time=48:00:00
+#SBATCH --cpus-per-task=100
+#SBATCH --mem=16G
+#SBATCH --time=24:00:00
 #SBATCH --output=slurm-%x-%j.out
 
 set -euo pipefail

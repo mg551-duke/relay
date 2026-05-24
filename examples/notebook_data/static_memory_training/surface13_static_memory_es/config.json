@@ -1,0 +1,81 @@
+{
+  "adam_beta1": 0.9,
+  "adam_beta2": 0.999,
+  "alpha": 1.0,
+  "base_seed": 7,
+  "baseline_memory_value": 0.15,
+  "batch_size": 4,
+  "checkpoint_dir": "C:\\Users\\User\\Documents\\projects-git\\relay_mother_folder\\relay\\examples\\notebook_data\\static_memory_training\\surface13_static_memory_es",
+  "code_path": "C:\\Users\\User\\Documents\\projects-git\\relay_mother_folder\\relay\\examples\\notebook_data\\stim_decoder_npz_exports\\surface13_from_stim_Z_basis_fault_projection.npz",
+  "convergence_penalty": 1.0,
+  "finetune_half_fraction": 0.2,
+  "finetune_replay_fraction": 0.3,
+  "finetune_steps": 2,
+  "half_train_limit": 12,
+  "half_validation_limit": 6,
+  "iteration_penalty": 0.05,
+  "learning_rate": 0.08,
+  "logical_weight_penalty": 4.0,
+  "max_hard_replay_cases": 32,
+  "max_iter": 20,
+  "memory_max": 0.3,
+  "memory_min": -0.3,
+  "metadata": {
+    "Hx_semantics": "heuristic_low_weight_independent_nulls_in_kernel_of_[Hz;Lz]",
+    "Hx_shape": [
+      256,
+      6085
+    ],
+    "Hz_semantics": "projected_check_matrix_used_by_decoder",
+    "Hz_shape": [
+      1176,
+      6085
+    ],
+    "Lz_semantics": "projected_logical_matrix_used_by_decoder",
+    "Lz_shape": [
+      1,
+      6085
+    ],
+    "basis_filter_applied": "Z",
+    "notes": [
+      "Hx rows are fault-mechanism null combinations, not data-block stabilizers.",
+      "Hx is not a full nullspace basis.",
+      "Hx is a heuristic low-weight independent family used for experiments.",
+      "The search uses canonical nullspace seeds from a row-reduced representation, plus pairwise xor expansion among the lightest seeds."
+    ],
+    "null_search": {
+      "exported_independent_rows": 256,
+      "exported_max_weight": 4,
+      "exported_median_weight": 4.0,
+      "exported_min_weight": 4,
+      "max_exported_hx_rows": 256,
+      "null_weight_cap": 8,
+      "pairwise_seed_limit": 512,
+      "pairwise_seed_rows_used": 512,
+      "seed_rows_under_seed_cap": 2086,
+      "seed_weight_cap": 12,
+      "stacked_nullity": 4908,
+      "stacked_rank": 1177,
+      "unique_even_candidates_under_null_cap": 65465
+    },
+    "num_detectors_in_dem": 1176,
+    "num_fault_mechanisms_after_pruning": 6085,
+    "num_observables_in_dem": 1,
+    "projection_kind": "fault_mechanism_to_Z_sector",
+    "stim_path": "C:\\Users\\User\\Documents\\projects-git\\relay_mother_folder\\relay\\tests\\testdata\\surface\\circuit=rotated_surface_code_memory_Z,distance=13,rounds=13,error_rate=0.001,noise_model=uniform_circuit,basis=CX.stim",
+    "target_name": "surface"
+  },
+  "mixed_half_fraction": 0.5,
+  "mixed_steps": 2,
+  "n_bits": 6085,
+  "n_logicals": 1,
+  "noise_std": 0.05,
+  "perturbations_per_step": 2,
+  "random_validation_samples": 8,
+  "resume": true,
+  "train_random_error_rate": 0.1,
+  "validation_interval": 1,
+  "validation_random_error_rate": 0.1,
+  "warmup_steps": 2,
+  "weight_decay": 0.0
+}

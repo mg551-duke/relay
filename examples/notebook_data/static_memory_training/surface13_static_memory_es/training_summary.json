@@ -1,0 +1,12 @@
+{
+  "best_selection_loss": 1.6909375000000002,
+  "best_weights_path": "C:\\Users\\User\\Documents\\projects-git\\relay_mother_folder\\relay\\examples\\notebook_data\\static_memory_training\\surface13_static_memory_es\\best_weights.npy",
+  "checkpoint_dir": "C:\\Users\\User\\Documents\\projects-git\\relay_mother_folder\\relay\\examples\\notebook_data\\static_memory_training\\surface13_static_memory_es",
+  "code_path": "examples\\notebook_data\\stim_decoder_npz_exports\\surface13_from_stim_Z_basis_fault_projection.npz",
+  "completed_steps": 6,
+  "latest_checkpoint": "C:\\Users\\User\\Documents\\projects-git\\relay_mother_folder\\relay\\examples\\notebook_data\\static_memory_training\\surface13_static_memory_es\\checkpoint_latest.pt",
+  "learned_weights_path": "C:\\Users\\User\\Documents\\projects-git\\relay_mother_folder\\relay\\examples\\notebook_data\\static_memory_training\\surface13_static_memory_es\\learned_weights.npy",
+  "resumed": false,
+  "train_metrics_csv": "C:\\Users\\User\\Documents\\projects-git\\relay_mother_folder\\relay\\examples\\notebook_data\\static_memory_training\\surface13_static_memory_es\\train_metrics.csv",
+  "validation_metrics_csv": "C:\\Users\\User\\Documents\\projects-git\\relay_mother_folder\\relay\\examples\\notebook_data\\static_memory_training\\surface13_static_memory_es\\validation_metrics.csv"
+}

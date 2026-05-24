@@ -1,0 +1,11 @@
+step,phase,batch_half_cases,batch_replay_cases,batch_random_cases,num_cases,loss_mean,logical_success_rate,exact_recovery_rate,convergence_rate,mean_iterations,mean_logical_weight
+1,warmup_half_stabilizer,4,0,0,4,0.275625,1.0,0.75,0.75,10.25,0.0
+2,warmup_half_stabilizer,4,0,0,4,0.7887500000000001,1.0,0.0,0.25,15.5,0.0
+3,mixed_half_and_random,2,0,2,4,1.5312499999999998,0.75,0.25,0.5,12.5,0.25
+4,mixed_half_and_random,2,0,2,4,1.7887499999999998,0.75,0.0,0.25,15.5,0.25
+5,random_dominant_finetune,1,0,3,4,2.05,0.75,0.0,0.0,20.0,0.25
+6,random_dominant_finetune,1,0,3,4,3.7887500000000003,0.25,0.0,0.25,15.5,0.75
+7,random_dominant_finetune,1,0,3,4,1.7924999999999998,0.75,0.25,0.25,17.0,0.25
+8,random_dominant_finetune,1,0,3,4,1.7925,0.75,0.25,0.25,17.0,0.25
+9,random_dominant_finetune,1,0,3,4,1.7925,0.75,0.25,0.25,17.0,0.25
+10,random_dominant_finetune,1,0,3,4,1.7924999999999998,0.75,0.0,0.25,17.0,0.25

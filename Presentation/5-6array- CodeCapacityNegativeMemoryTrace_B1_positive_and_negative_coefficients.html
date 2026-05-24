@@ -1,0 +1,1568 @@
+<div>
+<style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+</style>
+<table border="1" class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th></th>
+      <th>core_seed</th>
+      <th>decoder</th>
+      <th>coeff_seed</th>
+      <th>coeff_seed_offset</th>
+      <th>bit</th>
+      <th>memory_coefficient</th>
+      <th>success</th>
+      <th>iterations</th>
+      <th>support_bits</th>
+      <th>final_estimated_error_bits</th>
+      <th>estimated_bits_in_support</th>
+      <th>estimated_bits_outside_support</th>
+      <th>n_estimated_bits</th>
+      <th>n_estimated_bits_outside_support</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>0</th>
+      <td>1</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>1</td>
+      <td>0</td>
+      <td>154</td>
+      <td>-0.225324</td>
+      <td>True</td>
+      <td>19</td>
+      <td>[82, 154, 244, 643, 648, 649]</td>
+      <td>[82, 643, 649]</td>
+      <td>[82, 643, 649]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>1</th>
+      <td>1</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>1</td>
+      <td>0</td>
+      <td>244</td>
+      <td>-0.143781</td>
+      <td>True</td>
+      <td>19</td>
+      <td>[82, 154, 244, 643, 648, 649]</td>
+      <td>[82, 643, 649]</td>
+      <td>[82, 643, 649]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>2</th>
+      <td>1</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>1</td>
+      <td>0</td>
+      <td>648</td>
+      <td>0.179481</td>
+      <td>True</td>
+      <td>19</td>
+      <td>[82, 154, 244, 643, 648, 649]</td>
+      <td>[82, 643, 649]</td>
+      <td>[82, 643, 649]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>3</th>
+      <td>1</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>2</td>
+      <td>1</td>
+      <td>154</td>
+      <td>0.118394</td>
+      <td>True</td>
+      <td>27</td>
+      <td>[82, 154, 244, 643, 648, 649]</td>
+      <td>[154, 244, 648]</td>
+      <td>[154, 244, 648]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>4</th>
+      <td>1</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>2</td>
+      <td>1</td>
+      <td>244</td>
+      <td>-0.168650</td>
+      <td>True</td>
+      <td>27</td>
+      <td>[82, 154, 244, 643, 648, 649]</td>
+      <td>[154, 244, 648]</td>
+      <td>[154, 244, 648]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>5</th>
+      <td>1</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>2</td>
+      <td>1</td>
+      <td>648</td>
+      <td>0.024314</td>
+      <td>True</td>
+      <td>27</td>
+      <td>[82, 154, 244, 643, 648, 649]</td>
+      <td>[154, 244, 648]</td>
+      <td>[154, 244, 648]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>6</th>
+      <td>1</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>3</td>
+      <td>2</td>
+      <td>154</td>
+      <td>0.100894</td>
+      <td>True</td>
+      <td>20</td>
+      <td>[82, 154, 244, 643, 648, 649]</td>
+      <td>[154, 244, 648]</td>
+      <td>[154, 244, 648]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>7</th>
+      <td>1</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>3</td>
+      <td>2</td>
+      <td>244</td>
+      <td>0.142862</td>
+      <td>True</td>
+      <td>20</td>
+      <td>[82, 154, 244, 643, 648, 649]</td>
+      <td>[154, 244, 648]</td>
+      <td>[154, 244, 648]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>8</th>
+      <td>1</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>3</td>
+      <td>2</td>
+      <td>648</td>
+      <td>-0.218108</td>
+      <td>True</td>
+      <td>20</td>
+      <td>[82, 154, 244, 643, 648, 649]</td>
+      <td>[154, 244, 648]</td>
+      <td>[154, 244, 648]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>9</th>
+      <td>2</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>2</td>
+      <td>0</td>
+      <td>243</td>
+      <td>0.087091</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[243, 252, 342, 804, 809, 810]</td>
+      <td>[243, 252, 809, 810]</td>
+      <td>[243, 252, 809, 810]</td>
+      <td>[]</td>
+      <td>4</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>10</th>
+      <td>2</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>2</td>
+      <td>0</td>
+      <td>252</td>
+      <td>0.193842</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[243, 252, 342, 804, 809, 810]</td>
+      <td>[243, 252, 809, 810]</td>
+      <td>[243, 252, 809, 810]</td>
+      <td>[]</td>
+      <td>4</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>11</th>
+      <td>2</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>2</td>
+      <td>0</td>
+      <td>804</td>
+      <td>-0.230190</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[243, 252, 342, 804, 809, 810]</td>
+      <td>[243, 252, 809, 810]</td>
+      <td>[243, 252, 809, 810]</td>
+      <td>[]</td>
+      <td>4</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>12</th>
+      <td>2</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>3</td>
+      <td>1</td>
+      <td>243</td>
+      <td>0.127893</td>
+      <td>True</td>
+      <td>21</td>
+      <td>[243, 252, 342, 804, 809, 810]</td>
+      <td>[243, 252, 804]</td>
+      <td>[243, 252, 804]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>13</th>
+      <td>2</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>3</td>
+      <td>1</td>
+      <td>252</td>
+      <td>0.006987</td>
+      <td>True</td>
+      <td>21</td>
+      <td>[243, 252, 342, 804, 809, 810]</td>
+      <td>[243, 252, 804]</td>
+      <td>[243, 252, 804]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>14</th>
+      <td>2</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>3</td>
+      <td>1</td>
+      <td>804</td>
+      <td>0.200724</td>
+      <td>True</td>
+      <td>21</td>
+      <td>[243, 252, 342, 804, 809, 810]</td>
+      <td>[243, 252, 804]</td>
+      <td>[243, 252, 804]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>15</th>
+      <td>2</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>4</td>
+      <td>2</td>
+      <td>243</td>
+      <td>-0.279095</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[243, 252, 342, 804, 809, 810]</td>
+      <td>[252, 804]</td>
+      <td>[252, 804]</td>
+      <td>[]</td>
+      <td>2</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>16</th>
+      <td>2</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>4</td>
+      <td>2</td>
+      <td>252</td>
+      <td>-0.018786</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[243, 252, 342, 804, 809, 810]</td>
+      <td>[252, 804]</td>
+      <td>[252, 804]</td>
+      <td>[]</td>
+      <td>2</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>17</th>
+      <td>2</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>4</td>
+      <td>2</td>
+      <td>804</td>
+      <td>-0.249172</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[243, 252, 342, 804, 809, 810]</td>
+      <td>[252, 804]</td>
+      <td>[252, 804]</td>
+      <td>[]</td>
+      <td>2</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>18</th>
+      <td>3</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>3</td>
+      <td>0</td>
+      <td>231</td>
+      <td>0.232033</td>
+      <td>True</td>
+      <td>35</td>
+      <td>[231, 303, 330, 792, 797, 798]</td>
+      <td>[231, 303, 792]</td>
+      <td>[231, 303, 792]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>19</th>
+      <td>3</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>3</td>
+      <td>0</td>
+      <td>303</td>
+      <td>0.296123</td>
+      <td>True</td>
+      <td>35</td>
+      <td>[231, 303, 330, 792, 797, 798]</td>
+      <td>[231, 303, 792]</td>
+      <td>[231, 303, 792]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>20</th>
+      <td>3</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>3</td>
+      <td>0</td>
+      <td>792</td>
+      <td>-0.121428</td>
+      <td>True</td>
+      <td>35</td>
+      <td>[231, 303, 330, 792, 797, 798]</td>
+      <td>[231, 303, 792]</td>
+      <td>[231, 303, 792]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>21</th>
+      <td>3</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>4</td>
+      <td>1</td>
+      <td>231</td>
+      <td>0.254734</td>
+      <td>True</td>
+      <td>24</td>
+      <td>[231, 303, 330, 792, 797, 798]</td>
+      <td>[330, 797, 798]</td>
+      <td>[330, 797, 798]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>22</th>
+      <td>3</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>4</td>
+      <td>1</td>
+      <td>303</td>
+      <td>-0.176246</td>
+      <td>True</td>
+      <td>24</td>
+      <td>[231, 303, 330, 792, 797, 798]</td>
+      <td>[330, 797, 798]</td>
+      <td>[330, 797, 798]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>23</th>
+      <td>3</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>4</td>
+      <td>1</td>
+      <td>792</td>
+      <td>0.279635</td>
+      <td>True</td>
+      <td>24</td>
+      <td>[231, 303, 330, 792, 797, 798]</td>
+      <td>[330, 797, 798]</td>
+      <td>[330, 797, 798]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>24</th>
+      <td>3</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>5</td>
+      <td>2</td>
+      <td>231</td>
+      <td>-0.083143</td>
+      <td>True</td>
+      <td>18</td>
+      <td>[231, 303, 330, 792, 797, 798]</td>
+      <td>[330, 797, 798]</td>
+      <td>[330, 797, 798]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>25</th>
+      <td>3</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>5</td>
+      <td>2</td>
+      <td>303</td>
+      <td>-0.279013</td>
+      <td>True</td>
+      <td>18</td>
+      <td>[231, 303, 330, 792, 797, 798]</td>
+      <td>[330, 797, 798]</td>
+      <td>[330, 797, 798]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>26</th>
+      <td>3</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>5</td>
+      <td>2</td>
+      <td>792</td>
+      <td>0.296477</td>
+      <td>True</td>
+      <td>18</td>
+      <td>[231, 303, 330, 792, 797, 798]</td>
+      <td>[330, 797, 798]</td>
+      <td>[330, 797, 798]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>27</th>
+      <td>4</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>4</td>
+      <td>0</td>
+      <td>356</td>
+      <td>0.117443</td>
+      <td>True</td>
+      <td>25</td>
+      <td>[194, 266, 356, 760, 761, 818]</td>
+      <td>[356, 761, 818]</td>
+      <td>[356, 761, 818]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>28</th>
+      <td>4</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>4</td>
+      <td>0</td>
+      <td>761</td>
+      <td>0.273884</td>
+      <td>True</td>
+      <td>25</td>
+      <td>[194, 266, 356, 760, 761, 818]</td>
+      <td>[356, 761, 818]</td>
+      <td>[356, 761, 818]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>29</th>
+      <td>4</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>4</td>
+      <td>0</td>
+      <td>818</td>
+      <td>0.280169</td>
+      <td>True</td>
+      <td>25</td>
+      <td>[194, 266, 356, 760, 761, 818]</td>
+      <td>[356, 761, 818]</td>
+      <td>[356, 761, 818]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>30</th>
+      <td>4</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>5</td>
+      <td>1</td>
+      <td>356</td>
+      <td>-0.253553</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[194, 266, 356, 760, 761, 818]</td>
+      <td>[194, 266, 761, 818]</td>
+      <td>[194, 266, 761, 818]</td>
+      <td>[]</td>
+      <td>4</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>31</th>
+      <td>4</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>5</td>
+      <td>1</td>
+      <td>761</td>
+      <td>0.283564</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[194, 266, 356, 760, 761, 818]</td>
+      <td>[194, 266, 761, 818]</td>
+      <td>[194, 266, 761, 818]</td>
+      <td>[]</td>
+      <td>4</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>32</th>
+      <td>4</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>5</td>
+      <td>1</td>
+      <td>818</td>
+      <td>-0.040495</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[194, 266, 356, 760, 761, 818]</td>
+      <td>[194, 266, 761, 818]</td>
+      <td>[194, 266, 761, 818]</td>
+      <td>[]</td>
+      <td>4</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>33</th>
+      <td>4</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>6</td>
+      <td>2</td>
+      <td>356</td>
+      <td>0.183895</td>
+      <td>True</td>
+      <td>20</td>
+      <td>[194, 266, 356, 760, 761, 818]</td>
+      <td>[194, 266, 760]</td>
+      <td>[194, 266, 760]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>34</th>
+      <td>4</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>6</td>
+      <td>2</td>
+      <td>761</td>
+      <td>-0.139399</td>
+      <td>True</td>
+      <td>20</td>
+      <td>[194, 266, 356, 760, 761, 818]</td>
+      <td>[194, 266, 760]</td>
+      <td>[194, 266, 760]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>35</th>
+      <td>4</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>6</td>
+      <td>2</td>
+      <td>818</td>
+      <td>-0.202135</td>
+      <td>True</td>
+      <td>20</td>
+      <td>[194, 266, 356, 760, 761, 818]</td>
+      <td>[194, 266, 760]</td>
+      <td>[194, 266, 760]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>36</th>
+      <td>5</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>5</td>
+      <td>0</td>
+      <td>169</td>
+      <td>-0.151124</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[169, 241, 268, 730, 735, 736]</td>
+      <td>[169, 235, 268, 568, 730, 736, 829]</td>
+      <td>[169, 268, 730, 736]</td>
+      <td>[235, 568, 829]</td>
+      <td>7</td>
+      <td>3</td>
+    </tr>
+    <tr>
+      <th>37</th>
+      <td>5</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>5</td>
+      <td>0</td>
+      <td>268</td>
+      <td>-0.098742</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[169, 241, 268, 730, 735, 736]</td>
+      <td>[169, 235, 268, 568, 730, 736, 829]</td>
+      <td>[169, 268, 730, 736]</td>
+      <td>[235, 568, 829]</td>
+      <td>7</td>
+      <td>3</td>
+    </tr>
+    <tr>
+      <th>38</th>
+      <td>5</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>5</td>
+      <td>0</td>
+      <td>735</td>
+      <td>-0.044061</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[169, 241, 268, 730, 735, 736]</td>
+      <td>[169, 235, 268, 568, 730, 736, 829]</td>
+      <td>[169, 268, 730, 736]</td>
+      <td>[235, 568, 829]</td>
+      <td>7</td>
+      <td>3</td>
+    </tr>
+    <tr>
+      <th>39</th>
+      <td>5</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>6</td>
+      <td>1</td>
+      <td>169</td>
+      <td>0.072343</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[169, 241, 268, 730, 735, 736]</td>
+      <td>[]</td>
+      <td>[]</td>
+      <td>[]</td>
+      <td>0</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>40</th>
+      <td>5</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>6</td>
+      <td>1</td>
+      <td>268</td>
+      <td>0.106799</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[169, 241, 268, 730, 735, 736]</td>
+      <td>[]</td>
+      <td>[]</td>
+      <td>[]</td>
+      <td>0</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>41</th>
+      <td>5</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>6</td>
+      <td>1</td>
+      <td>735</td>
+      <td>0.042459</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[169, 241, 268, 730, 735, 736]</td>
+      <td>[]</td>
+      <td>[]</td>
+      <td>[]</td>
+      <td>0</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>42</th>
+      <td>5</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>7</td>
+      <td>2</td>
+      <td>169</td>
+      <td>0.276811</td>
+      <td>True</td>
+      <td>22</td>
+      <td>[169, 241, 268, 730, 735, 736]</td>
+      <td>[169, 268, 735]</td>
+      <td>[169, 268, 735]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>43</th>
+      <td>5</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>7</td>
+      <td>2</td>
+      <td>268</td>
+      <td>-0.116154</td>
+      <td>True</td>
+      <td>22</td>
+      <td>[169, 241, 268, 730, 735, 736]</td>
+      <td>[169, 268, 735]</td>
+      <td>[169, 268, 735]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>44</th>
+      <td>5</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>7</td>
+      <td>2</td>
+      <td>735</td>
+      <td>-0.007782</td>
+      <td>True</td>
+      <td>22</td>
+      <td>[169, 241, 268, 730, 735, 736]</td>
+      <td>[169, 268, 735]</td>
+      <td>[169, 268, 735]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>45</th>
+      <td>6</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>6</td>
+      <td>0</td>
+      <td>142</td>
+      <td>0.208789</td>
+      <td>True</td>
+      <td>22</td>
+      <td>[70, 142, 232, 631, 636, 637]</td>
+      <td>[142, 232, 631]</td>
+      <td>[142, 232, 631]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>46</th>
+      <td>6</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>6</td>
+      <td>0</td>
+      <td>232</td>
+      <td>-0.071554</td>
+      <td>True</td>
+      <td>22</td>
+      <td>[70, 142, 232, 631, 636, 637]</td>
+      <td>[142, 232, 631]</td>
+      <td>[142, 232, 631]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>47</th>
+      <td>6</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>6</td>
+      <td>0</td>
+      <td>631</td>
+      <td>0.295367</td>
+      <td>True</td>
+      <td>22</td>
+      <td>[70, 142, 232, 631, 636, 637]</td>
+      <td>[142, 232, 631]</td>
+      <td>[142, 232, 631]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>48</th>
+      <td>6</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>7</td>
+      <td>1</td>
+      <td>142</td>
+      <td>-0.044010</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[70, 142, 232, 631, 636, 637]</td>
+      <td>[142, 232, 636]</td>
+      <td>[142, 232, 636]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>49</th>
+      <td>6</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>7</td>
+      <td>1</td>
+      <td>232</td>
+      <td>0.220364</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[70, 142, 232, 631, 636, 637]</td>
+      <td>[142, 232, 636]</td>
+      <td>[142, 232, 636]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>50</th>
+      <td>6</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>7</td>
+      <td>1</td>
+      <td>631</td>
+      <td>0.207973</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[70, 142, 232, 631, 636, 637]</td>
+      <td>[142, 232, 636]</td>
+      <td>[142, 232, 636]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>51</th>
+      <td>6</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>8</td>
+      <td>2</td>
+      <td>142</td>
+      <td>0.089887</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[70, 142, 232, 631, 636, 637]</td>
+      <td>[70, 631]</td>
+      <td>[70, 631]</td>
+      <td>[]</td>
+      <td>2</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>52</th>
+      <td>6</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>8</td>
+      <td>2</td>
+      <td>232</td>
+      <td>-0.236235</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[70, 142, 232, 631, 636, 637]</td>
+      <td>[70, 631]</td>
+      <td>[70, 631]</td>
+      <td>[]</td>
+      <td>2</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>53</th>
+      <td>6</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>8</td>
+      <td>2</td>
+      <td>631</td>
+      <td>-0.229291</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[70, 142, 232, 631, 636, 637]</td>
+      <td>[70, 631]</td>
+      <td>[70, 631]</td>
+      <td>[]</td>
+      <td>2</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>54</th>
+      <td>7</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>7</td>
+      <td>0</td>
+      <td>851</td>
+      <td>-0.178583</td>
+      <td>True</td>
+      <td>22</td>
+      <td>[290, 362, 389, 851, 856, 857]</td>
+      <td>[851, 856, 857]</td>
+      <td>[851, 856, 857]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>55</th>
+      <td>7</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>7</td>
+      <td>0</td>
+      <td>856</td>
+      <td>0.063175</td>
+      <td>True</td>
+      <td>22</td>
+      <td>[290, 362, 389, 851, 856, 857]</td>
+      <td>[851, 856, 857]</td>
+      <td>[851, 856, 857]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>56</th>
+      <td>7</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>7</td>
+      <td>0</td>
+      <td>857</td>
+      <td>0.294380</td>
+      <td>True</td>
+      <td>22</td>
+      <td>[290, 362, 389, 851, 856, 857]</td>
+      <td>[851, 856, 857]</td>
+      <td>[851, 856, 857]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>57</th>
+      <td>7</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>8</td>
+      <td>1</td>
+      <td>851</td>
+      <td>-0.101524</td>
+      <td>True</td>
+      <td>18</td>
+      <td>[290, 362, 389, 851, 856, 857]</td>
+      <td>[290, 362, 389]</td>
+      <td>[290, 362, 389]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>58</th>
+      <td>7</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>8</td>
+      <td>1</td>
+      <td>856</td>
+      <td>0.135451</td>
+      <td>True</td>
+      <td>18</td>
+      <td>[290, 362, 389, 851, 856, 857]</td>
+      <td>[290, 362, 389]</td>
+      <td>[290, 362, 389]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>59</th>
+      <td>7</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>8</td>
+      <td>1</td>
+      <td>857</td>
+      <td>-0.296776</td>
+      <td>True</td>
+      <td>18</td>
+      <td>[290, 362, 389, 851, 856, 857]</td>
+      <td>[290, 362, 389]</td>
+      <td>[290, 362, 389]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>60</th>
+      <td>7</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>9</td>
+      <td>2</td>
+      <td>851</td>
+      <td>0.193043</td>
+      <td>True</td>
+      <td>17</td>
+      <td>[290, 362, 389, 851, 856, 857]</td>
+      <td>[851, 856, 857]</td>
+      <td>[851, 856, 857]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>61</th>
+      <td>7</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>9</td>
+      <td>2</td>
+      <td>856</td>
+      <td>0.014353</td>
+      <td>True</td>
+      <td>17</td>
+      <td>[290, 362, 389, 851, 856, 857]</td>
+      <td>[851, 856, 857]</td>
+      <td>[851, 856, 857]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>62</th>
+      <td>7</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>9</td>
+      <td>2</td>
+      <td>857</td>
+      <td>0.178423</td>
+      <td>True</td>
+      <td>17</td>
+      <td>[290, 362, 389, 851, 856, 857]</td>
+      <td>[851, 856, 857]</td>
+      <td>[851, 856, 857]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>63</th>
+      <td>8</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>8</td>
+      <td>0</td>
+      <td>263</td>
+      <td>-0.164869</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[191, 263, 353, 757, 758, 815]</td>
+      <td>[92, 98, 190, 192, 195, 196, 197, 235, 240, 242, 245, 248, 249, 252, 258, 267, 348, 354, 357, 358, 359, 380, 437, 478, 479, 653, 658, 659, 725, 730, 731, 736, 737, 762, 803, 813, 824, 829, 830, 84...</td>
+      <td>[]</td>
+      <td>[92, 98, 190, 192, 195, 196, 197, 235, 240, 242, 245, 248, 249, 252, 258, 267, 348, 354, 357, 358, 359, 380, 437, 478, 479, 653, 658, 659, 725, 730, 731, 736, 737, 762, 803, 813, 824, 829, 830, 84...</td>
+      <td>43</td>
+      <td>43</td>
+    </tr>
+    <tr>
+      <th>64</th>
+      <td>8</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>8</td>
+      <td>0</td>
+      <td>353</td>
+      <td>-0.136750</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[191, 263, 353, 757, 758, 815]</td>
+      <td>[92, 98, 190, 192, 195, 196, 197, 235, 240, 242, 245, 248, 249, 252, 258, 267, 348, 354, 357, 358, 359, 380, 437, 478, 479, 653, 658, 659, 725, 730, 731, 736, 737, 762, 803, 813, 824, 829, 830, 84...</td>
+      <td>[]</td>
+      <td>[92, 98, 190, 192, 195, 196, 197, 235, 240, 242, 245, 248, 249, 252, 258, 267, 348, 354, 357, 358, 359, 380, 437, 478, 479, 653, 658, 659, 725, 730, 731, 736, 737, 762, 803, 813, 824, 829, 830, 84...</td>
+      <td>43</td>
+      <td>43</td>
+    </tr>
+    <tr>
+      <th>65</th>
+      <td>8</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>8</td>
+      <td>0</td>
+      <td>815</td>
+      <td>0.234709</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[191, 263, 353, 757, 758, 815]</td>
+      <td>[92, 98, 190, 192, 195, 196, 197, 235, 240, 242, 245, 248, 249, 252, 258, 267, 348, 354, 357, 358, 359, 380, 437, 478, 479, 653, 658, 659, 725, 730, 731, 736, 737, 762, 803, 813, 824, 829, 830, 84...</td>
+      <td>[]</td>
+      <td>[92, 98, 190, 192, 195, 196, 197, 235, 240, 242, 245, 248, 249, 252, 258, 267, 348, 354, 357, 358, 359, 380, 437, 478, 479, 653, 658, 659, 725, 730, 731, 736, 737, 762, 803, 813, 824, 829, 830, 84...</td>
+      <td>43</td>
+      <td>43</td>
+    </tr>
+    <tr>
+      <th>66</th>
+      <td>8</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>9</td>
+      <td>1</td>
+      <td>263</td>
+      <td>-0.238755</td>
+      <td>True</td>
+      <td>39</td>
+      <td>[191, 263, 353, 757, 758, 815]</td>
+      <td>[191, 757, 758]</td>
+      <td>[191, 757, 758]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>67</th>
+      <td>8</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>9</td>
+      <td>1</td>
+      <td>353</td>
+      <td>0.273249</td>
+      <td>True</td>
+      <td>39</td>
+      <td>[191, 263, 353, 757, 758, 815]</td>
+      <td>[191, 757, 758]</td>
+      <td>[191, 757, 758]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>68</th>
+      <td>8</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>9</td>
+      <td>1</td>
+      <td>815</td>
+      <td>0.085117</td>
+      <td>True</td>
+      <td>39</td>
+      <td>[191, 263, 353, 757, 758, 815]</td>
+      <td>[191, 757, 758]</td>
+      <td>[191, 757, 758]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>69</th>
+      <td>8</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>10</td>
+      <td>2</td>
+      <td>263</td>
+      <td>0.088955</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[191, 263, 353, 757, 758, 815]</td>
+      <td>[11, 182, 191, 195, 197, 236, 248, 249, 257, 267, 268, 269, 335, 347, 357, 359, 380, 478, 479, 653, 658, 665, 730, 743, 748, 749, 756, 759, 762, 815, 824, 829, 830, 842, 847, 848]</td>
+      <td>[191, 815]</td>
+      <td>[11, 182, 195, 197, 236, 248, 249, 257, 267, 268, 269, 335, 347, 357, 359, 380, 478, 479, 653, 658, 665, 730, 743, 748, 749, 756, 759, 762, 824, 829, 830, 842, 847, 848]</td>
+      <td>36</td>
+      <td>34</td>
+    </tr>
+    <tr>
+      <th>70</th>
+      <td>8</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>10</td>
+      <td>2</td>
+      <td>353</td>
+      <td>0.253245</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[191, 263, 353, 757, 758, 815]</td>
+      <td>[11, 182, 191, 195, 197, 236, 248, 249, 257, 267, 268, 269, 335, 347, 357, 359, 380, 478, 479, 653, 658, 665, 730, 743, 748, 749, 756, 759, 762, 815, 824, 829, 830, 842, 847, 848]</td>
+      <td>[191, 815]</td>
+      <td>[11, 182, 195, 197, 236, 248, 249, 257, 267, 268, 269, 335, 347, 357, 359, 380, 478, 479, 653, 658, 665, 730, 743, 748, 749, 756, 759, 762, 824, 829, 830, 842, 847, 848]</td>
+      <td>36</td>
+      <td>34</td>
+    </tr>
+    <tr>
+      <th>71</th>
+      <td>8</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>10</td>
+      <td>2</td>
+      <td>815</td>
+      <td>-0.229071</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[191, 263, 353, 757, 758, 815]</td>
+      <td>[11, 182, 191, 195, 197, 236, 248, 249, 257, 267, 268, 269, 335, 347, 357, 359, 380, 478, 479, 653, 658, 665, 730, 743, 748, 749, 756, 759, 762, 815, 824, 829, 830, 842, 847, 848]</td>
+      <td>[191, 815]</td>
+      <td>[11, 182, 195, 197, 236, 248, 249, 257, 267, 268, 269, 335, 347, 357, 359, 380, 478, 479, 653, 658, 665, 730, 743, 748, 749, 756, 759, 762, 824, 829, 830, 842, 847, 848]</td>
+      <td>36</td>
+      <td>34</td>
+    </tr>
+    <tr>
+      <th>72</th>
+      <td>9</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>9</td>
+      <td>0</td>
+      <td>68</td>
+      <td>-0.073668</td>
+      <td>True</td>
+      <td>38</td>
+      <td>[59, 68, 158, 620, 625, 626]</td>
+      <td>[68, 625, 626]</td>
+      <td>[68, 625, 626]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>73</th>
+      <td>9</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>9</td>
+      <td>0</td>
+      <td>625</td>
+      <td>0.013474</td>
+      <td>True</td>
+      <td>38</td>
+      <td>[59, 68, 158, 620, 625, 626]</td>
+      <td>[68, 625, 626]</td>
+      <td>[68, 625, 626]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>74</th>
+      <td>9</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>9</td>
+      <td>0</td>
+      <td>626</td>
+      <td>0.007733</td>
+      <td>True</td>
+      <td>38</td>
+      <td>[59, 68, 158, 620, 625, 626]</td>
+      <td>[68, 625, 626]</td>
+      <td>[68, 625, 626]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>75</th>
+      <td>9</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>10</td>
+      <td>1</td>
+      <td>68</td>
+      <td>0.011875</td>
+      <td>True</td>
+      <td>24</td>
+      <td>[59, 68, 158, 620, 625, 626]</td>
+      <td>[68, 625, 626]</td>
+      <td>[68, 625, 626]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>76</th>
+      <td>9</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>10</td>
+      <td>1</td>
+      <td>625</td>
+      <td>-0.080194</td>
+      <td>True</td>
+      <td>24</td>
+      <td>[59, 68, 158, 620, 625, 626]</td>
+      <td>[68, 625, 626]</td>
+      <td>[68, 625, 626]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>77</th>
+      <td>9</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>10</td>
+      <td>1</td>
+      <td>626</td>
+      <td>-0.003556</td>
+      <td>True</td>
+      <td>24</td>
+      <td>[59, 68, 158, 620, 625, 626]</td>
+      <td>[68, 625, 626]</td>
+      <td>[68, 625, 626]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>78</th>
+      <td>9</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>11</td>
+      <td>2</td>
+      <td>68</td>
+      <td>0.237455</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[59, 68, 158, 620, 625, 626]</td>
+      <td>[1, 2, 41, 58, 59, 60, 67, 68, 69, 74, 120, 140, 152, 153, 157, 158, 159, 163, 164, 248, 257, 338, 347, 416, 428, 458, 463, 464, 535, 547, 548, 553, 554, 567, 569, 570, 614, 615, 624, 625, 626, 62...</td>
+      <td>[59, 68, 158, 625, 626]</td>
+      <td>[1, 2, 41, 58, 60, 67, 69, 74, 120, 140, 152, 153, 157, 159, 163, 164, 248, 257, 338, 347, 416, 428, 458, 463, 464, 535, 547, 548, 553, 554, 567, 569, 570, 614, 615, 624, 627, 629, 647, 652, 653, ...</td>
+      <td>48</td>
+      <td>43</td>
+    </tr>
+    <tr>
+      <th>79</th>
+      <td>9</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>11</td>
+      <td>2</td>
+      <td>625</td>
+      <td>-0.249666</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[59, 68, 158, 620, 625, 626]</td>
+      <td>[1, 2, 41, 58, 59, 60, 67, 68, 69, 74, 120, 140, 152, 153, 157, 158, 159, 163, 164, 248, 257, 338, 347, 416, 428, 458, 463, 464, 535, 547, 548, 553, 554, 567, 569, 570, 614, 615, 624, 625, 626, 62...</td>
+      <td>[59, 68, 158, 625, 626]</td>
+      <td>[1, 2, 41, 58, 60, 67, 69, 74, 120, 140, 152, 153, 157, 159, 163, 164, 248, 257, 338, 347, 416, 428, 458, 463, 464, 535, 547, 548, 553, 554, 567, 569, 570, 614, 615, 624, 627, 629, 647, 652, 653, ...</td>
+      <td>48</td>
+      <td>43</td>
+    </tr>
+    <tr>
+      <th>80</th>
+      <td>9</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>11</td>
+      <td>2</td>
+      <td>626</td>
+      <td>-0.147269</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[59, 68, 158, 620, 625, 626]</td>
+      <td>[1, 2, 41, 58, 59, 60, 67, 68, 69, 74, 120, 140, 152, 153, 157, 158, 159, 163, 164, 248, 257, 338, 347, 416, 428, 458, 463, 464, 535, 547, 548, 553, 554, 567, 569, 570, 614, 615, 624, 625, 626, 62...</td>
+      <td>[59, 68, 158, 625, 626]</td>
+      <td>[1, 2, 41, 58, 60, 67, 69, 74, 120, 140, 152, 153, 157, 159, 163, 164, 248, 257, 338, 347, 416, 428, 458, 463, 464, 535, 547, 548, 553, 554, 567, 569, 570, 614, 615, 624, 627, 629, 647, 652, 653, ...</td>
+      <td>48</td>
+      <td>43</td>
+    </tr>
+    <tr>
+      <th>81</th>
+      <td>10</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>10</td>
+      <td>0</td>
+      <td>288</td>
+      <td>0.126827</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[216, 288, 315, 777, 782, 783]</td>
+      <td>[244, 777]</td>
+      <td>[777]</td>
+      <td>[244]</td>
+      <td>2</td>
+      <td>1</td>
+    </tr>
+    <tr>
+      <th>82</th>
+      <td>10</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>10</td>
+      <td>0</td>
+      <td>777</td>
+      <td>-0.024428</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[216, 288, 315, 777, 782, 783]</td>
+      <td>[244, 777]</td>
+      <td>[777]</td>
+      <td>[244]</td>
+      <td>2</td>
+      <td>1</td>
+    </tr>
+    <tr>
+      <th>83</th>
+      <td>10</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>10</td>
+      <td>0</td>
+      <td>782</td>
+      <td>-0.178765</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[216, 288, 315, 777, 782, 783]</td>
+      <td>[244, 777]</td>
+      <td>[777]</td>
+      <td>[244]</td>
+      <td>2</td>
+      <td>1</td>
+    </tr>
+    <tr>
+      <th>84</th>
+      <td>10</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>11</td>
+      <td>1</td>
+      <td>288</td>
+      <td>-0.280576</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[216, 288, 315, 777, 782, 783]</td>
+      <td>[288, 289, 316, 321, 783]</td>
+      <td>[288, 783]</td>
+      <td>[289, 316, 321]</td>
+      <td>5</td>
+      <td>3</td>
+    </tr>
+    <tr>
+      <th>85</th>
+      <td>10</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>11</td>
+      <td>1</td>
+      <td>777</td>
+      <td>0.294815</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[216, 288, 315, 777, 782, 783]</td>
+      <td>[288, 289, 316, 321, 783]</td>
+      <td>[288, 783]</td>
+      <td>[289, 316, 321]</td>
+      <td>5</td>
+      <td>3</td>
+    </tr>
+    <tr>
+      <th>86</th>
+      <td>10</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>11</td>
+      <td>1</td>
+      <td>782</td>
+      <td>0.076572</td>
+      <td>False</td>
+      <td>40</td>
+      <td>[216, 288, 315, 777, 782, 783]</td>
+      <td>[288, 289, 316, 321, 783]</td>
+      <td>[288, 783]</td>
+      <td>[289, 316, 321]</td>
+      <td>5</td>
+      <td>3</td>
+    </tr>
+    <tr>
+      <th>87</th>
+      <td>10</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>12</td>
+      <td>2</td>
+      <td>288</td>
+      <td>0.233358</td>
+      <td>True</td>
+      <td>21</td>
+      <td>[216, 288, 315, 777, 782, 783]</td>
+      <td>[288, 777, 782]</td>
+      <td>[288, 777, 782]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>88</th>
+      <td>10</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>12</td>
+      <td>2</td>
+      <td>777</td>
+      <td>0.293835</td>
+      <td>True</td>
+      <td>21</td>
+      <td>[216, 288, 315, 777, 782, 783]</td>
+      <td>[288, 777, 782]</td>
+      <td>[288, 777, 782]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+    <tr>
+      <th>89</th>
+      <td>10</td>
+      <td>Mem-BP / random signed coefficients</td>
+      <td>12</td>
+      <td>2</td>
+      <td>782</td>
+      <td>-0.008317</td>
+      <td>True</td>
+      <td>21</td>
+      <td>[216, 288, 315, 777, 782, 783]</td>
+      <td>[288, 777, 782]</td>
+      <td>[288, 777, 782]</td>
+      <td>[]</td>
+      <td>3</td>
+      <td>0</td>
+    </tr>
+  </tbody>
+</table>
+</div>
